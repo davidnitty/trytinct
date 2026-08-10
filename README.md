@@ -44,10 +44,6 @@ pip install -e ".[dev]"     # pytest
 If a heavy engine is missing, the command fails with a clear
 `pip install tinct[train]` style hint rather than a confusing import error.
 
-## Docs
-
-- [`BACKEND_STRUCTURE_AND_SECURITY.md`](docs/BACKEND_STRUCTURE_AND_SECURITY.md)
-- [`ROADMAP_V1_TO_V3.md`](docs/ROADMAP_V1_TO_V3.md)
 
 ## Roadmap status
 
