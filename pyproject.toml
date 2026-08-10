@@ -3,13 +3,13 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "trytinct"
+name = "tinct"
 version = "0.1.0"
 description = "CLI-first post-training stack for LLMs — validate, train, eval, and ship with cryptographic evidence."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "TryTinct" }]
+authors = [{ name = "tinct" }]
 keywords = ["llm", "fine-tuning", "lora", "qlora", "post-training", "cli"]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -45,8 +45,8 @@ eval = [
     "scikit-learn>=1.3",
 ]
 full = [
-    "trytinct[train]",
-    "trytinct[eval]",
+    "tinct[train]",
+    "tinct[eval]",
 ]
 dev = [
     "pytest>=8.0",
@@ -57,7 +57,7 @@ dev = [
 tinct = "tinct.cli.app:main"
 
 [project.urls]
-Homepage = "https://example.com/trytinct"
+Homepage = "https://example.com/tinct"
 
 [tool.setuptools.packages.find]
 where = ["src"]

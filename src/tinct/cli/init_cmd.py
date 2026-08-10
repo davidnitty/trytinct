@@ -1,4 +1,4 @@
-"""``tinct init`` — scaffold a new TryTinct project."""
+"""``tinct init`` — scaffold a new tinct project."""
 
 from __future__ import annotations
 

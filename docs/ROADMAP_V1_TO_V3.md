@@ -1,6 +1,6 @@
-# TryTinct Backend Development Roadmap (V1 to V3)
+# tinct Backend Development Roadmap (V1 to V3)
 
-This guide outlines the step-by-step backend architecture for building the **TryTinct** CLI. The strategy is to build a rock-solid foundation with dense Llama models in V1, expand to Qwen's specific optimizations in V2, and finally tackle the complex MoE/Reasoning architecture of Deepseek in V3.
+This guide outlines the step-by-step backend architecture for building the **tinct** CLI. The strategy is to build a rock-solid foundation with dense Llama models in V1, expand to Qwen's specific optimizations in V2, and finally tackle the complex MoE/Reasoning architecture of Deepseek in V3.
 
 ---
 
@@ -20,7 +20,7 @@ pipeline with signed ship evidence. See `BACKEND_STRUCTURE_AND_SECURITY.md`.
 
 ### Suggested Directory Structure
 ```text
-trytinct/
+tinct/
 ├── src/
 │   ├── cli/            # Typer commands: `tinct advise`, `tinct train`, `tinct ship`
 │   ├── core/           # Data Doctor, Config Generator, Rule Engine

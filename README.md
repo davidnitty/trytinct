@@ -1,8 +1,8 @@
-# TryTinct
+# tinct
 
 **CLI-first post-training stack for LLMs.**
 
-TryTinct validates instruction data, fine-tunes a **Llama** adapter with
+tinct validates instruction data, fine-tunes a **Llama** adapter with
 **LoRA/QLoRA**, evaluates the result, and produces a **SHIP / DON'T-SHIP**
 decision backed by a **signed cryptographic evidence report**.
 

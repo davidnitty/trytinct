@@ -18,7 +18,7 @@ dist/
 .coverage
 htmlcov/
 
-# TryTinct project state (never commit local artifacts/keys)
+# tinct project state (never commit local artifacts/keys)
 .tinct/
 *.sqlite3
 

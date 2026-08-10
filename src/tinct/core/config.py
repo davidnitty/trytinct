@@ -1,6 +1,6 @@
 """Project configuration.
 
-TryTinct projects are configured by a single ``tinct.yaml`` at the project
+tinct projects are configured by a single ``tinct.yaml`` at the project
 root. The schema is defined with pydantic v2 so unknown or mistyped settings
 fail fast (secure by default: no silent config drift).
 
@@ -19,7 +19,7 @@ try:
     from pydantic import BaseModel, Field, field_validator
 except ImportError:  # pragma: no cover
     raise RuntimeError(
-        "pydantic>=2 is required for TryTinct. Install with: pip install trytinct"
+        "pydantic>=2 is required for tinct. Install with: pip install tinct"
     )
 
 CONFIG_FILENAME = "tinct.yaml"

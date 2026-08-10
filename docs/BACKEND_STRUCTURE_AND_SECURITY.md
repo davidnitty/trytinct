@@ -1,8 +1,8 @@
-# TryTinct Backend Structure & Security
+# tinct Backend Structure & Security
 
-This document defines the full backend structure for **TryTinct**, a CLI-first post-training stack for LLMs.
+This document defines the full backend structure for **tinct**, a CLI-first post-training stack for LLMs.
 
-TryTinct helps users:
+tinct helps users:
 
 1. Validate and diagnose training data.
 2. Auto-select a post-training method.
@@ -44,7 +44,7 @@ tinct server start
 
 # 2. Command Reference
 
-This repository implements the TryTinct backend as a **local-first CLI** with a
+This repository implements the tinct backend as a **local-first CLI** with a
 lightweight core and lazily-loaded ML engines.
 
 | Command | Purpose |

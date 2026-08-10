@@ -1,4 +1,4 @@
-"""TryTinct CLI application.
+"""tinct CLI application.
 
 Command tree::
 
@@ -26,7 +26,7 @@ from .security_cmd import security_app
 
 app = typer.Typer(
     name="tinct",
-    help="TryTinct — CLI-first post-training stack for LLMs.",
+    help="tinct — CLI-first post-training stack for LLMs.",
     add_completion=False,
     no_args_is_help=True,
     invoke_without_command=True,
@@ -52,10 +52,10 @@ def _entry_callback(
     version: bool = typer.Option(False, "--version", help="Show version and exit."),
     verbose: bool = typer.Option(False, "-v", "--verbose", help="Verbose (debug) logging."),
 ) -> None:
-    """TryTinct entry point."""
+    """tinct entry point."""
     setup_logging(verbose=verbose)
     if version:
-        get_console().print(f"trytinct {__version__}")
+        get_console().print(f"tinct {__version__}")
         # Returning (not raising) lets the click runner print nothing extra.
         raise typer.Exit()
 
@@ -69,7 +69,7 @@ def init(
     root: Path = typer.Option(".", "--root", help="Parent directory for the project."),
     no_key: bool = typer.Option(False, "--no-key", help="Skip signing key generation."),
 ) -> None:
-    """Scaffold a new TryTinct project."""
+    """Scaffold a new tinct project."""
     init_cmd.run_init(project_name, model, root, generate_key=not no_key)
 
 

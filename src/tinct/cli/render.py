@@ -1,4 +1,4 @@
-"""Console rendering helpers for TryTinct CLI output (via rich)."""
+"""Console rendering helpers for tinct CLI output (via rich)."""
 
 from __future__ import annotations
 

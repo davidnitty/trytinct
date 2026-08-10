@@ -1,6 +1,6 @@
 """Project lifecycle and on-disk state layout.
 
-A TryTinct project root looks like::
+A tinct project root looks like::
 
     project/
     ├── tinct.yaml          # ProjectConfig (see core/config.py)
@@ -27,7 +27,7 @@ from tinct.core.config import (
     load_config,
 )
 
-# Model-family gate. TryTinct currently supports Llama only.
+# Model-family gate. tinct currently supports Llama only.
 SUPPORTED_MODEL_FAMILIES = ("llama",)
 
 STATE_FILENAME = "state.json"
@@ -47,13 +47,13 @@ def detect_model_family(model: str) -> str:
     if "llama" in name:
         return "llama"
     raise UnsupportedModelFamily(
-        f"Model {model!r} is not yet supported. TryTinct V0 supports Llama "
+        f"Model {model!r} is not yet supported. tinct V0 supports Llama "
         "family models only; Qwen and DeepSeek are roadmap items (see docs/ROADMAP_V1_TO_V3.md)."
     )
 
 
 class Project:
-    """A single TryTinct project on disk."""
+    """A single tinct project on disk."""
 
     def __init__(self, root: Path, config: ProjectConfig) -> None:
         self.root = root

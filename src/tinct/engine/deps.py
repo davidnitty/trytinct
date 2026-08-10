@@ -17,7 +17,7 @@ class MissingDependencyError(RuntimeError):
     """Raised when a lazily-loaded heavy dependency is unavailable."""
 
 
-def import_optional(module_name: str, extra: str, package: str = "trytinct") -> Any:
+def import_optional(module_name: str, extra: str, package: str = "tinct") -> Any:
     """Import ``module_name`` or raise a helpful :class:`MissingDependencyError`.
 
     ``extra`` is the PEP 508 extra name (e.g. ``train``) to suggest.
