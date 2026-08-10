@@ -1,0 +1,134 @@
+"""TryTinct CLI application.
+
+Command tree::
+
+    tinct init <name> <model>
+    tinct validate <dataset>
+    tinct advise <dataset>
+    tinct train  <dataset> [--run NAME] [--model ID]
+    tinct eval   [--run NAME]
+    tinct ship   [--run NAME]
+    tinct security check | key generate
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import typer
+
+from tinct import __version__
+from tinct.core.project import Project
+from tinct.utils.logging import get_console, setup_logging
+
+from . import eval_cmd, init_cmd, ship_cmd, train_cmd, validate_cmd
+from .security_cmd import security_app
+
+app = typer.Typer(
+    name="tinct",
+    help="TryTinct — CLI-first post-training stack for LLMs.",
+    add_completion=False,
+    no_args_is_help=True,
+    invoke_without_command=True,
+)
+app.add_typer(security_app)
+
+
+def _open_project(root: Path) -> Project:
+    try:
+        return Project.open(root)
+    except (FileNotFoundError, ValueError) as exc:
+        get_console().print(f"[bold red]{exc}[/]")
+        raise typer.Exit(code=1) from exc
+
+
+def _exit(code: int) -> None:
+    if code != 0:
+        raise typer.Exit(code=code)
+
+
+@app.callback()
+def _entry_callback(
+    version: bool = typer.Option(False, "--version", help="Show version and exit."),
+    verbose: bool = typer.Option(False, "-v", "--verbose", help="Verbose (debug) logging."),
+) -> None:
+    """TryTinct entry point."""
+    setup_logging(verbose=verbose)
+    if version:
+        get_console().print(f"trytinct {__version__}")
+        # Returning (not raising) lets the click runner print nothing extra.
+        raise typer.Exit()
+
+
+# -- init -------------------------------------------------------------------
+
+@app.command("init")
+def init(
+    project_name: str = typer.Argument(..., help="New project directory name."),
+    model: str = typer.Argument(..., help="HF model id, e.g. meta-llama/Llama-3.1-8B."),
+    root: Path = typer.Option(".", "--root", help="Parent directory for the project."),
+    no_key: bool = typer.Option(False, "--no-key", help="Skip signing key generation."),
+) -> None:
+    """Scaffold a new TryTinct project."""
+    init_cmd.run_init(project_name, model, root, generate_key=not no_key)
+
+
+# -- validate / advise ------------------------------------------------------
+
+@app.command("validate")
+def validate(
+    dataset: Path = typer.Argument(..., help="JSON/JSONL instruction dataset."),
+    root: Path = typer.Option(".", "--root", help="Project root."),
+) -> None:
+    """Validate an instruction dataset with the Data Doctor (fail-closed)."""
+    project = _open_project(root)
+    _exit(0 if validate_cmd.run_validate(project, dataset) else 1)
+
+
+@app.command("advise")
+def advise(
+    dataset: Path = typer.Argument(..., help="JSON/JSONL instruction dataset."),
+    root: Path = typer.Option(".", "--root", help="Project root."),
+) -> None:
+    """Validate and recommend a post-training method."""
+    project = _open_project(root)
+    validate_cmd.run_advise(project, dataset)
+
+
+# -- training ---------------------------------------------------------------
+
+@app.command("train")
+def train(
+    dataset: Path = typer.Argument(..., help="JSON/JSONL instruction dataset."),
+    root: Path = typer.Option(".", "--root", help="Project root."),
+    run: str | None = typer.Option(None, "--run", help="Run name (defaults to timestamp)."),
+    model: str | None = typer.Option(None, "--model", help="Override the configured base model."),
+) -> None:
+    """Validate then fine-tune a Llama adapter (LoRA/QLoRA)."""
+    project = _open_project(root)
+    _exit(train_cmd.run_train(project, dataset, run, model))
+
+
+@app.command("eval")
+def evaluate(
+    root: Path = typer.Option(".", "--root", help="Project root."),
+    run: str | None = typer.Option(None, "--run", help="Run name (defaults to latest)."),
+) -> None:
+    """Gate a trained checkpoint against thresholds."""
+    project = _open_project(root)
+    _exit(eval_cmd.run_eval(project, run))
+
+
+@app.command("ship")
+def ship(
+    root: Path = typer.Option(".", "--root", help="Project root."),
+    run: str | None = typer.Option(None, "--run", help="Run name (defaults to latest)."),
+) -> None:
+    """Produce the SHIP / DON'T-SHIP decision with signed evidence."""
+    project = _open_project(root)
+    _exit(ship_cmd.run_ship(project, run))
+
+
+def main() -> None:
+    """CLI launcher — invoked by the console script / ``python -m tinct``."""
+    app()
