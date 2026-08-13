@@ -77,11 +77,17 @@ def prepare_base_model_chunks(
 
 
 def run_train(project: Project, dataset: Path, run_name: str | None,
-              model_override: str | None) -> int:
+              model_override: str | None, method: str = "sft",
+              lora_rank_override: int | None = None) -> int:
     """Validate, split, train. Returns 0 on success, non-zero otherwise."""
     console = get_console()
 
-    # Fail-closed 1: unsupported model family.
+    # Fail-closed 0: training method must be supported in V0.
+    if method.lower() != "sft":
+        console.print(f"[bold red]Method {method!r} is not supported in V0. Only 'sft'.[/]")
+        return 1
+
+    # Fail-closed 1: unsupported model family (security gate).
     if model_override:
         project.config.train.model = model_override
     try:
@@ -89,6 +95,9 @@ def run_train(project: Project, dataset: Path, run_name: str | None,
     except ValueError as exc:
         console.print(f"[bold red]{exc}[/]")
         return 2
+
+    if lora_rank_override is not None:
+        project.config.train.lora_r = lora_rank_override
 
     # Fail-closed 2: data must pass the Data Doctor.
     doctor = DataDoctor(
@@ -149,11 +158,12 @@ def run_train(project: Project, dataset: Path, run_name: str | None,
     _materialize_metrics(run_dir)
 
     if not ok_run:
-        console.print("[bold red]Training was halted by a fail-closed guard. DO NOT SHIP this run.[/]")
+        console.print("\n[tinct] VERDICT: DON'T SHIP (Training failed / fail-closed guard).")
         console.print(f"  inspect: {run_dir / 'fail_state.json'} (if present)")
-        return 1
+        return 2
 
-    console.print("[bold green]Training complete (fail-closed guards passed).[/]")
+    console.print("\n[tinct] SUCCESS. Artifacts saved to:")
     console.print(f"  adapter: {run_dir / 'adapter'}")
-    console.print(f"\nNext: run `tinct eval --run {name}` to gate the checkpoint.")
+    console.print(f"  run:     {run_dir}")
+    console.print("Run `tinct eval` and `tinct ship` to certify this run.\n")
     return 0

@@ -22,31 +22,15 @@ from pathlib import Path
 from typing import Optional
 
 from tinct.core.config import ProjectConfig, dump_config, load_config
+from tinct.core.model_gate import (  # noqa: F401 (re-exported for compat)
+    SUPPORTED_MODEL_FAMILIES,
+    UnsupportedModelFamily,
+    check_model_family,
+    detect_model_family,
+)
 from tinct.storage.paths import TinctPaths
 
-# Model-family gate. tinct currently supports Llama only.
-SUPPORTED_MODEL_FAMILIES = ("llama",)
-
 STATE_FILENAME = "state.json"
-
-
-class UnsupportedModelFamily(ValueError):
-    """Raised when a model outside the supported families is requested."""
-
-
-def detect_model_family(model: str) -> str:
-    """Return the (lowercased) family name for ``model``, or raise.
-
-    Heuristic: a ``llama`` substring (or a known local path name) maps to
-    ``llama``. Anything else is rejected until Qwen/DeepSeek support lands.
-    """
-    name = model.rsplit("/", 1)[-1].lower()
-    if "llama" in name:
-        return "llama"
-    raise UnsupportedModelFamily(
-        f"Model {model!r} is not yet supported. tinct V0 supports Llama "
-        "family models only; Qwen and DeepSeek are roadmap items (see docs/ROADMAP_V1_TO_V3.md)."
-    )
 
 
 class Project:
@@ -147,13 +131,10 @@ class Project:
 
     def refuse_if_unsupported_model(self) -> None:
         """Fail-closed gate before any train/eval work."""
-        family = detect_model_family(self.config.train.model)
-        allowed = self.config.model_families_allowed
-        if allowed and family not in allowed:
-            raise UnsupportedModelFamily(
-                f"Model family {family!r} is not among the allowed families "
-                f"configured in project.yaml: {allowed}"
-            )
+        check_model_family(
+            self.config.train.model,
+            allowed_families=self.config.model_families_allowed,
+        )
 
     def create_run(self, name: str) -> Path:
         run_dir = self.run_dir(name)

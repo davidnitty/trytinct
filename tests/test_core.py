@@ -32,9 +32,10 @@ def test_project_create_refuses_nonempty(tmp_path: Path):
 
 def test_unsupported_model_blocks(tmp_path: Path):
     with pytest.raises(UnsupportedModelFamily):
-        detect_model_family("Qwen/Qwen2.5-7B")
+        detect_model_family("unknown/arch-9000")
     p = Project.create(tmp_path / "p", "demo", "meta-llama/Llama-3.1-8B")
     p.config.train.model = "deepseek-ai/DeepSeek-R1"
+    # Detected as deepseek, but not allowed by default -> fail-closed.
     with pytest.raises(UnsupportedModelFamily):
         p.refuse_if_unsupported_model()
 

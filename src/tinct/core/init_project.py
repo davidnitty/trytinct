@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tinct.core.project import Project, detect_model_family
+from tinct.core.model_gate import check_model_family
+from tinct.core.project import Project
 from tinct.storage.paths import TinctPaths
 
 # Lines ensured in the project-root .gitignore (local-only state).
@@ -39,7 +40,7 @@ def init_tinct_project(project_root: Path, model: str,
     root = Path(project_root).resolve()
 
     # Fail-closed before any writes: model must be an allowed family.
-    detect_model_family(model)
+    check_model_family(model)
 
     # Scaffold state dirs + a default config (delegates to Project.create for
     # fail-fast non-empty checks, state.json, and schema-valid YAML).
