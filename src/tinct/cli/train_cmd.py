@@ -9,8 +9,10 @@ from pathlib import Path
 from tinct.cli.render import print_report
 from tinct.core.datadoctor import DataDoctor, DatasetLoadError
 from tinct.core.project import Project
+from tinct.engine.chunking import ModelChunker
 from tinct.engine.deps import MissingDependencyError, ensure_train_deps
 from tinct.engine.hf_trainer import HfLlamaTrainer
+from tinct.storage.paths import get_cache_dir, resolve_model
 from tinct.utils.logging import get_console
 
 
@@ -27,6 +29,35 @@ def _write_jsonl(records, path: Path) -> None:
     with path.open("w", encoding="utf-8") as fh:
         for rec in records:
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+def prepare_base_model_chunks(
+    project: Project, run_dir: Path, model_id: str, chunk_size_mb: int = 500
+) -> Path:
+    """Resolve the base model, chunk it (AirLLM style), and record the chunk
+    hashes into the run's evidence bundle.
+
+    The manifest is persisted as ``runs/<name>/base_model_chunks.json`` so
+    ``tinct ship`` can prove exactly which weights training used.
+
+    Returns the resolved local path to the model (used as the training base).
+    """
+    console = get_console()
+    cache_dir = get_cache_dir(project.root)
+    console.print("[tinct] Preparing base model for low-VRAM streaming...")
+
+    model_path = resolve_model(model_id, cache_dir=cache_dir)
+    chunker = ModelChunker(cache_dir)
+    chunk_manifest = chunker.chunk_model(model_path, chunk_size_mb=chunk_size_mb)
+
+    manifest_path = run_dir / "base_model_chunks.json"
+    manifest_path.write_text(
+        json.dumps(chunk_manifest, indent=2), encoding="utf-8"
+    )
+    console.print(f"  model:     {model_path}")
+    console.print(f"  chunks:    {chunker.cache_dir} ({len(chunk_manifest)} files)")
+    console.print(f"  manifest:  {manifest_path}")
+    return model_path
 
 
 def run_train(project: Project, dataset: Path, run_name: str | None,
@@ -77,11 +108,19 @@ def run_train(project: Project, dataset: Path, run_name: str | None,
     _write_jsonl(valid_records, valid_p)
     console.print(f"[green]Run {name!r} created at[/] {run_dir}")
 
+    # Automatic model prep: resolve + chunk + hash the base model. Fail-closed:
+    # a model without a safetensors index is rejected before any training.
+    try:
+        model_path = prepare_base_model_chunks(project, run_dir, train_cfg.model)
+    except ValueError as exc:
+        console.print(f"[bold red]Model prep blocked:[/] {exc}")
+        return 2
+
     engine = HfLlamaTrainer()
     result = engine.train(
         run_name=name,
         run_dir=run_dir,
-        model=train_cfg.model,
+        model=str(model_path),
         train_records=train_records,
         valid_records=valid_records,
         config=train_cfg,

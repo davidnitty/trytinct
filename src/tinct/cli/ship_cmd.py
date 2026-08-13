@@ -62,6 +62,11 @@ def run_ship(project: Project, run_name: str | None) -> int:
     metrics_path = run_dir / "metrics.json"
     if metrics_path.is_file():
         artifacts["metrics.json"] = hash_path(metrics_path)
+    # Base-model chunk manifest: pins exactly which weights were used in
+    # training (fail-closed if a run was trained without it — evidence gap).
+    chunk_manifest = run_dir / "base_model_chunks.json"
+    if chunk_manifest.is_file():
+        artifacts["base_model_chunks.json"] = hash_path(chunk_manifest)
 
     report = EvidenceReport(
         project_name=project.config.project_name,

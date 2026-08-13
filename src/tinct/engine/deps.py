@@ -36,7 +36,7 @@ def ensure_train_deps(quant: str = "qlora") -> None:
 
     Raises :class:`MissingDependencyError` as soon as one is missing.
     """
-    for mod in ("torch", "transformers", "trl", "peft", "accelerate", "datasets"):
+    for mod in ("torch", "transformers", "trl", "peft", "accelerate", "datasets", "huggingface_hub"):
         import_optional(mod, "train")
     if quant == "qlora":
         import_optional("bitsandbytes", "train")
