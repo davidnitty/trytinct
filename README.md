@@ -1,130 +1,119 @@
 # tinct
 
-**CLI-first post-training stack for LLMs.**
+![CI](https://github.com/davidnitty/trytinct/actions/workflows/ci.yml/badge.svg)
+
+**CLI-first post-training stack for LLMs.** Validate → train → eval → ship,
+with a fail-closed security model and **cryptographically signed evidence** for
+every checkpoint you certify.
+
+```
+tinct init → tinct validate → tinct train → tinct eval → tinct ship
+```
 
 tinct validates instruction data, fine-tunes a **Llama** adapter with
-**LoRA/QLoRA**, evaluates the result, and produces a **SHIP / DON'T-SHIP**
-decision backed by a **signed cryptographic evidence report**.
+**LoRA/QLoRA**, runs a generation smoke test, and produces a **SHIP /
+DON'T-SHIP** decision backed by an **Ed25519-signed evidence manifest**.
 
-```
-validate → advise → train → eval → ship
-```
+---
+
+## Why tinct?
+
+- **Fail-closed by default** — the Data Doctor blocks bad data before training;
+  a loss-explosion guard kills runs instantly; the eval gate blocks bad
+  checkpoints; the ship engine refuses to certify anything without evidence.
+- **Proof, not vibes** — every run records hashes of the data, base-model
+  chunks, adapter weights, and logs, then signs them with an Ed25519 key.
+- **Local-first** — everything runs on your machine; state lives in `.tinct/`.
+- **Lightweight core** — importing `tinct` never pulls torch/transformers; ML
+  deps are optional extras loaded lazily only when a command needs them.
 
 ## Quick start
 
 ```bash
-pip install -e .                 # lightweight core only
-tinct init my-project
+pip install -e ".[train]"                      # core + training stack
+tinct init my-project meta-llama/Llama-3.1-8B  # scaffold + signing key
 cd my-project
-tinct validate data.jsonl
-tinct train   --model meta-llama/Llama-3.1-8B --data data.jsonl   # needs [train]
-tinct eval    --run latest
-tinct ship    --run latest
-tinct security check
+tinct validate data.jsonl                      # Data Doctor (fail-closed)
+tinct train  --dataset data.jsonl --max-loss-threshold 10.0
+tinct eval                                      # generation smoke test
+tinct ship                                      # signed SHIP/DON'T-SHIP
+tinct security check --run latest               # verify the signature
 ```
 
-> State (config, runs, cache, keys, evidence) lives under `.tinct/`.
+> All state (config, runs, cache, keys, evidence) lives under `.tinct/` —
+> git-ignored by default.
 
-## Design principles
+## CLI reference
 
-- **Local-first** — everything runs on your machine.
-- **Secure by default / fail-closed** — validation blocks training; eval blocks shipping.
-- **Reproducible & audit-friendly** — seeded runs, artifact hashes, signed manifests.
-- **Lightweight core** — importing `tinct` never pulls torch/transformers.
+| Command | Purpose |
+| --- | --- |
+| `tinct init <name> <model>` | Scaffold a project + Ed25519 signing key. |
+| `tinct validate <dataset>` | Data Doctor: schema, empties, duplicates, lengths. |
+| `tinct advise <dataset>` | Recommend a post-training method. |
+| `tinct train` | LoRA/QLoRA SFT with the fail-closed loss guard. |
+| `tinct eval` | Generation smoke test → `eval_report.json`. |
+| `tinct ship` | Certification: gate checks + adapter hash + signed evidence. |
+| `tinct security check` | Audit secrets, key perms, evidence signatures. |
 
-## Heavy ML dependencies (optional extras)
+### The fail-closed loss guard
 
-Heavy packages are loaded lazily only when a command needs them:
-
-```bash
-pip install -e ".[train]"   # torch, transformers, TRL, PEFT, bitsandbytes, ...
-pip install -e ".[eval]"    # scikit-learn, ...
-pip install -e ".[full]"    # everything
-pip install -e ".[dev]"     # pytest
-```
-
-If a heavy engine is missing, the command fails with a clear
-`pip install tinct[train]` style hint rather than a confusing import error.
-
-
-## Roadmap status
-
-- **V0 (current):** Llama LoRA/QLoRA end-to-end with signed ship evidence.
-- **V2/V3:** Qwen + DeepSeek optimizations (see roadmap doc).
-
-> **Note:** actually fine-tuning Llama-3.1-8B requires a suitable GPU and the
-> model weights. The core CLI (init/validate/eval/ship/security check) runs on
-> CPU with no ML dependencies installed.
-
-## The V0.1 happy path (acceptance test, GPU box)
-
-The full certification loop — train → eval (generation smoke test) → ship
-(signed evidence):
-
-```bash
-pip install -e ".[train]"
-tinct init demo meta-llama/Llama-3.2-1B     # needs HF token (gated model)
-cd demo
-cp ../examples/good_data.jsonl .
-tinct train --dataset good_data.jsonl --max-loss-threshold 10.0
-tinct eval                                  # runs generation smoke test
-tinct ship                                  # hashes adapter + signs evidence
-```
-
-What happens:
-
-1. `tinct train` — validates data, chunks + hashes the base model, fine-tunes
-   with the fail-closed loss guard (threshold from `--max-loss-threshold`).
-2. `tinct eval` — the **generation smoke test** loads base model + adapter,
-   runs the 3 prompts, and fails the gate on empty or looping text; writes
-   `.tinct/runs/<name>/eval_report.json`.
-3. `tinct ship` — the **certification engine**:
-   - refuses if `fail_state.json` exists (guard tripped) → `DON'T SHIP` (exit 2)
-   - requires `eval_report.json` with `status: PASS` → else `DON'T SHIP`
-   - hashes the adapter (`adapter_sha256`, deterministic), signs the evidence
-     manifest with Ed25519, and saves it under `.tinct/evidence/`
-   - prints `VERDICT: SHIP`
-
-`examples/good_data.jsonl` is a 24-row Llama-3 chat-template dataset for the
-happy path; `examples/broken_data.jsonl` is the garbage dataset that trips the
-loss guard.
-
-## V0.1-GPU milestone: prove the fail-closed guard (no 4-hour run)
-
-Trigger the loss-explosion guard intentionally with the bundled broken dataset
-and an artificially low threshold:
-
-```bash
-pip install -e ".[train]"
-tinct init smoke meta-llama/Llama-3.2-1B      # requires HF token (gated model)
-cd smoke
-tinct train --dataset ../examples/broken_data.jsonl --max-loss-threshold 0.1
-```
-
-Expected: the run starts, the loss is garbage, the **Fail-Closed Callback** trips
-almost immediately, and you get:
+Training halts instantly on **NaN / Inf / over-threshold** loss, writes
+`fail_state.json`, and the run is forever marked **DON'T SHIP**:
 
 ```
-[tinct] FATAL: Loss exploded ...
+[tinct] FATAL: Loss 10.3804 … halting immediately.
 [tinct] VERDICT: DON'T SHIP (Training failed / fail-closed guard).
 ```
 
-with `.tinct/runs/<name>/fail_state.json` recording `reason: loss_explosion` and
-the structured logs populating `.tinct/runs/<name>/train_log.jsonl`.
+### The certification engine (`tinct ship`)
 
-**CPU-only / no HF token?** Use a tiny non-gated Llama-family model instead —
-this is the exact pipeline that was verified end-to-end on a CPU box:
+1. Refuses if `fail_state.json` exists (guard tripped).
+2. Requires `eval_report.json` with `status: PASS`.
+3. Hashes the adapter (`adapter_sha256`) — proves exactly which weights ship.
+4. Signs the evidence manifest with Ed25519 and saves it under `.tinct/evidence/`.
+
+## Optional extras
 
 ```bash
-tinct init smoke hf-internal-testing/tiny-random-LlamaForCausalLM
-cd smoke
-tinct train --dataset ../examples/broken_data.jsonl --max-loss-threshold 2.0
-# -> FATAL: Loss 10.38 ... halting immediately. / VERDICT: DON'T SHIP
+pip install -e .              # lightweight core (typer, pydantic, cryptography)
+pip install -e ".[train]"     # + torch, transformers, TRL, PEFT, accelerate, datasets
+pip install -e ".[eval]"      # + scikit-learn
+pip install -e ".[full]"      # everything
+pip install -e ".[dev]"       # + pytest
 ```
 
-The same guard logic is also covered by unit tests (`test_sft_trainer.py`) that
-run with no ML dependencies installed — `FailClosedCore` is exercised directly.
+If a heavy engine is missing, the command fails with a clear
+`pip install tinct[train]` hint instead of a confusing import error.
 
-To let it run past the guard instead, omit `--max-loss-threshold` and watch
-`train_log.jsonl` populate (it will still halt at the first NaN/Inf/over-
-threshold step).
+## Project layout
+
+```
+src/tinct/
+├── cli/          # typer commands (init, validate, advise, train, eval, ship, security)
+├── core/         # config, Data Doctor, model gate, project/init logic
+├── engine/       # model chunking, streaming, lazy dep guards
+├── trainers/     # fail-closed SFT trainer (TRL)
+├── evals/        # generation smoke test, loss gate, harness
+├── security/     # Ed25519 signing, evidence manifests, audits
+└── storage/      # TinctPaths — single source of truth for the state tree
+```
+
+## Examples
+
+- `examples/good_data.jsonl` — 24 rows of Llama-3 chat templates (happy path).
+- `examples/broken_data.jsonl` — garbage data that trips the loss guard.
+
+## Docs
+
+- [`BACKEND_STRUCTURE_AND_SECURITY.md`](docs/BACKEND_STRUCTURE_AND_SECURITY.md)
+- [`ROADMAP_V1_TO_V3.md`](docs/ROADMAP_V1_TO_V3.md)
+
+## Roadmap
+
+- **V0 (current):** Llama LoRA/QLoRA end-to-end with signed ship evidence.
+- **V2:** Qwen optimizations (Unsloth, GRPO).
+- **V3:** DeepSeek MoE/reasoning.
+
+## License
+
+MIT

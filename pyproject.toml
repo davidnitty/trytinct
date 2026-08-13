@@ -57,7 +57,8 @@ dev = [
 tinct = "tinct.cli.app:main"
 
 [project.urls]
-Homepage = "https://example.com/tinct"
+Homepage = "https://github.com/davidnitty/trytinct"
+Repository = "https://github.com/davidnitty/trytinct"
 
 [tool.setuptools.packages.find]
 where = ["src"]
