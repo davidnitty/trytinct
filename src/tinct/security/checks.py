@@ -14,6 +14,7 @@ from typing import List, Optional
 
 from tinct.core.rules import RuleReport, error, info, ok, warn
 from tinct.security.evidence import EvidenceReport, sha256_file
+from tinct.storage.paths import TinctPaths
 
 # Substrings that indicate a value is probably a secret.
 _SECRET_HINTS = ("sk-", "ghp_", "api_key", "password", "secret", "token", "bearer")
@@ -47,11 +48,12 @@ class SecurityAuditor:
         root = self.root
 
         # 1. Project initialized.
-        config = root / "tinct.yaml"
+        config = TinctPaths(root).project_config
         if config.is_file():
-            report.add(ok("sec.config", "Config present", "tinct.yaml found"))
+            report.add(ok("sec.config", "Config present", "project.yaml found"))
         else:
-            report.add(error("sec.config", "Config present", "Missing tinct.yaml; project not initialized."))
+            report.add(error("sec.config", "Config present",
+                             "Missing .tinct/project.yaml; project not initialized."))
 
         # 2. No secrets in .env files.
         leaked = _scan_for_secrets(root, self.env_path)
@@ -63,7 +65,7 @@ class SecurityAuditor:
             report.add(ok("sec.secrets", "No secrets in dotfiles"))
 
         # 3. Private key file permissions are restrictive (POSIX only).
-        keys_dir = root / ".tinct" / "keys"
+        keys_dir = TinctPaths(root).keys_dir
         if keys_dir.is_dir():
             priv_keys = list(keys_dir.glob("*_private.pem"))
             if not priv_keys:
@@ -88,7 +90,7 @@ class SecurityAuditor:
                             "No .tinct/keys directory yet."))
 
         # 4. Verify any existing evidence signatures.
-        evidence_dir = root / ".tinct" / "evidence"
+        evidence_dir = TinctPaths(root).evidence_dir
         verified = checked = 0
         failures = []
         if evidence_dir.is_dir():
@@ -114,7 +116,7 @@ class SecurityAuditor:
                           f"All {verified} evidence signatures verified."))
 
         # 5. No obvious world-readable model checkpoints tracked.
-        runs_dir = root / "runs"
+        runs_dir = TinctPaths(root).runs_dir
         if runs_dir.is_dir() and not any(runs_dir.iterdir()):
             report.add(info("sec.runs", "Run directory clean", "No runs yet."))
 

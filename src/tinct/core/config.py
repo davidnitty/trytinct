@@ -1,8 +1,9 @@
 """Project configuration.
 
-tinct projects are configured by a single ``tinct.yaml`` at the project
-root. The schema is defined with pydantic v2 so unknown or mistyped settings
-fail fast (secure by default: no silent config drift).
+tinct projects are configured by a single ``project.yaml`` under the
+project's ``.tinct/`` state dir. The schema is defined with pydantic v2 so
+unknown or mistyped settings fail fast (secure by default: no silent config
+drift).
 
 Only lightweight dependencies (pydantic + PyYAML) are used here.
 """
@@ -22,7 +23,7 @@ except ImportError:  # pragma: no cover
         "pydantic>=2 is required for tinct. Install with: pip install tinct"
     )
 
-CONFIG_FILENAME = "tinct.yaml"
+CONFIG_FILENAME = "project.yaml"  # located under the project's .tinct dir
 CONFIG_VERSION = "1"
 
 # Supported dataset schemas for instruction tuning.
@@ -100,7 +101,7 @@ class SecurityConfig(BaseModel):
 
 
 class ProjectConfig(BaseModel):
-    """Top-level project configuration persisted to tinct.yaml."""
+    """Top-level project configuration persisted to .tinct/project.yaml."""
 
     version: Literal["1"] = CONFIG_VERSION
     project_name: str
@@ -131,7 +132,7 @@ def dump_config(config: ProjectConfig, path: Path) -> None:
 
 
 def load_config(path: Path) -> ProjectConfig:
-    """Load ``tinct.yaml``, failing loudly on parse/validation errors."""
+    """Load ``.tinct/project.yaml``, failing loudly on parse/validation errors."""
     if not path.is_file():
         raise FileNotFoundError(f"Config not found: {path} (run `tinct init` first)")
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))

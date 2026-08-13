@@ -49,7 +49,7 @@ lightweight core and lazily-loaded ML engines.
 
 | Command | Purpose |
 | --- | --- |
-| `tinct init` | Scaffold a new project (`tinct.yaml`, directories, signing key). |
+| `tinct init` | Scaffold a new project (`.tinct/project.yaml`, directories, signing key). |
 | `tinct validate` | Run the **Data Doctor** over an instruction dataset. |
 | `tinct advise` | Recommend a post-training method from data + budget (a summary of `validate`). |
 | `tinct train` | Fine-tune a Llama adapter with LoRA/QLoRA (low-VRAM streaming). |

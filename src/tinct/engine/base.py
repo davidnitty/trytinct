@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Protocol, runtime_checkable
 
 @dataclass
 class TrainingRun:
-    """The durable result of a training run, laid out under ``runs/<name>/``."""
+    """The durable result of a training run, laid out under ``.tinct/runs/<name>/``."""
 
     name: str
     run_dir: Path

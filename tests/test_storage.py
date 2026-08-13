@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from tinct.engine.deps import MissingDependencyError
-from tinct.storage.paths import get_cache_dir, resolve_model
+from tinct.storage.paths import TinctPaths, get_cache_dir, resolve_model
 
 
 def _fake_model(model_dir: Path):
@@ -50,3 +50,35 @@ def test_resolve_hub_id_requires_huggingface_hub():
     # huggingface_hub is not installed in the test env -> dep guard fires.
     with pytest.raises(MissingDependencyError):
         resolve_model("meta-llama/Llama-3.1-8B")
+
+
+def test_tinct_paths_full_tree(tmp_path: Path):
+    paths = TinctPaths(tmp_path)
+    assert paths.tinct_dir == tmp_path / ".tinct"
+    assert paths.project_config == tmp_path / ".tinct" / "project.yaml"
+    assert paths.cache_dir == tmp_path / ".tinct" / "cache"
+    assert paths.model_cache == paths.cache_dir / "models"
+    assert paths.dataset_cache == paths.cache_dir / "datasets"
+    assert paths.runs_dir == tmp_path / ".tinct" / "runs"
+    assert paths.keys_dir == tmp_path / ".tinct" / "keys"
+    assert paths.evidence_dir == tmp_path / ".tinct" / "evidence"
+
+    paths.ensure_dirs()
+    for d in (paths.cache_dir, paths.model_cache, paths.dataset_cache,
+              paths.runs_dir, paths.keys_dir, paths.evidence_dir):
+        assert d.is_dir()
+
+
+def test_discover_walks_up_to_project(tmp_path: Path):
+    paths = TinctPaths(tmp_path)
+    paths.ensure_dirs()
+    nested = tmp_path / "a" / "b" / "c"
+    nested.mkdir(parents=True)
+    # chdir into the nested dir and rediscover from there.
+    import os
+    prev = os.getcwd()
+    try:
+        os.chdir(nested)
+        assert TinctPaths.discover().project_root.resolve() == tmp_path.resolve()
+    finally:
+        os.chdir(prev)

@@ -129,7 +129,7 @@ def as_dict(self: RuleReport) -> Dict[str, Any]:
 if BaseModel is not None:  # pragma: no cover
 
     class RuleReportModel(BaseModel):
-        """Pydantic view of a report, useful for serializing to tinct.yaml."""
+        """Pydantic view of a report, useful for serializing to project.yaml."""
 
         title: str
         passed: bool

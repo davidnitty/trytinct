@@ -18,10 +18,12 @@ tinct init my-project
 cd my-project
 tinct validate data.jsonl
 tinct train   --model meta-llama/Llama-3.1-8B --data data.jsonl   # needs [train]
-tinct eval    --checkpoint runs/latest
-tinct ship    --checkpoint runs/latest
+tinct eval    --run latest
+tinct ship    --run latest
 tinct security check
 ```
+
+> State (config, runs, cache, keys, evidence) lives under `.tinct/`.
 
 ## Design principles
 

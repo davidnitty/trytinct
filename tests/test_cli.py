@@ -18,7 +18,7 @@ def _write_dataset(path: Path, n: int = 40):
 def test_init(tmp_path: Path):
     result = runner.invoke(app, ["init", "proj", "meta-llama/Llama-3.1-8B", "--root", str(tmp_path)])
     assert result.exit_code == 0, result.output
-    assert (tmp_path / "proj" / "tinct.yaml").is_file()
+    assert (tmp_path / "proj" / ".tinct" / "project.yaml").is_file()
     assert (tmp_path / "proj" / ".tinct" / "keys").is_dir()
 
 
@@ -54,7 +54,7 @@ def test_security_check_on_fresh_project(tmp_path: Path):
 
 
 def _seed_run(proj: Path, name: str, final_eval_loss: float):
-    run = proj / "runs" / name
+    run = proj / ".tinct" / "runs" / name
     (run / "adapter").mkdir(parents=True)
     (run / "adapter" / "adapter_model.safetensors").write_text("x")
     (run / "train.jsonl").write_text("")

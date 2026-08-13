@@ -37,8 +37,8 @@ def prepare_base_model_chunks(
     """Resolve the base model, chunk it (AirLLM style), and record the chunk
     hashes into the run's evidence bundle.
 
-    The manifest is persisted as ``runs/<name>/base_model_chunks.json`` so
-    ``tinct ship`` can prove exactly which weights training used.
+    The manifest is persisted as ``.tinct/runs/<name>/base_model_chunks.json``
+    so ``tinct ship`` can prove exactly which weights training used.
 
     Returns the resolved local path to the model (used as the training base).
     """
