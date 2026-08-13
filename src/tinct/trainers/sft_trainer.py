@@ -83,6 +83,12 @@ def run_sft(
     run_dir: Path,
     lora_rank: int = 16,
     max_loss_threshold: float = 10.0,
+    num_train_epochs: int = 1,
+    per_device_batch_size: int = 2,
+    grad_accum_steps: int = 4,
+    learning_rate: float = 2e-4,
+    logging_steps: int = 10,
+    max_seq_length: int = 2048,
 ) -> bool:
     """Execute a guarded SFT run.
 
@@ -129,10 +135,15 @@ def run_sft(
     # Security: block remote code execution by default.
     trust_remote_code = False
 
-    torch_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    # CPU-safe dtype logic: bf16 only on CUDA that supports it; float32 on CPU.
+    has_cuda = torch.cuda.is_available()
+    use_bf16 = bool(has_cuda and torch.cuda.is_bf16_supported())
+    torch_dtype = torch.bfloat16 if use_bf16 else torch.float32
     bnb_config = None
     try:
         import bitsandbytes  # noqa: F401
+        if not has_cuda:
+            raise ImportError("bitsandbytes requires CUDA; using 16-bit LoRA on CPU")
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
@@ -141,7 +152,7 @@ def run_sft(
         )
         log.info("[tinct] bitsandbytes detected. Using 4-bit QLoRA.")
     except ImportError:
-        log.info("[tinct] bitsandbytes missing. Using standard 16-bit LoRA.")
+        log.info("[tinct] bitsandbytes missing/unsupported. Using standard LoRA.")
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name_or_path,
@@ -170,22 +181,21 @@ def run_sft(
     dataset = load_dataset("json", data_files=str(dataset_path), split="train")
 
     # --- 7. Training arguments ---
-    use_bf16 = torch.cuda.is_bf16_supported()
     sft_config = SFTConfig(
         output_dir=str(output_dir),
-        num_train_epochs=1,  # short for the V0.1 demo/smoke test
-        per_device_train_batch_size=2,
-        gradient_accumulation_steps=4,
-        learning_rate=2e-4,
-        fp16=not use_bf16,
+        num_train_epochs=num_train_epochs,
+        per_device_train_batch_size=per_device_batch_size,
+        gradient_accumulation_steps=grad_accum_steps,
+        learning_rate=learning_rate,
+        fp16=has_cuda and not use_bf16,
         bf16=use_bf16,
-        logging_steps=10,
+        logging_steps=logging_steps,
         optim="paged_adamw_8bit" if bnb_config else "adamw_torch",
         save_strategy="epoch",
-        save_safetensors=True,  # security: no pickle .bin files
         report_to="none",
-        max_seq_length=2048,
+        max_length=max_seq_length,
         dataset_text_field="text",
+        packing=False,  # one formatted text sequence per example
     )
 
     # --- 8. Initialize trainer ---
@@ -208,9 +218,16 @@ def run_sft(
     try:
         trainer.train()
     except Exception as exc:
-        log.error("[tinct] Training crashed with exception: %s", exc)
-        with open(fail_state_file, "w", encoding="utf-8") as fh:
-            json.dump({"reason": "exception", "error": str(exc)}, fh)
+        if callback.aborted:
+            # The guard already halted the run; a post-halt framework quirk
+            # (e.g. TRL/transformers version mismatch) is not a real crash.
+            log.error("[tinct] Run halted by fail-closed guard (DO NOT SHIP).")
+        else:
+            log.error("[tinct] Training crashed with exception: %s", exc)
+            # Preserve earlier loss_explosion evidence if the guard already fired.
+            if not fail_state_file.exists():
+                with open(fail_state_file, "w", encoding="utf-8") as fh:
+                    json.dump({"reason": "exception", "error": str(exc)}, fh)
         return False
 
     # --- 10. Check fail-closed state ---

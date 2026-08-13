@@ -123,12 +123,22 @@ def resolve_model(model_id: str, cache_dir: Path | None = None) -> Path:
         target = local
     else:
         target = _snapshot_hub(hub_id=model_id, cache_dir=cache_dir)
-    if not (target / "model.safetensors.index.json").is_file():
+    if not (_has_safetensors(target)):
         raise ValueError(
-            f"Model at {target} has no safetensors index file. "
-            "tinct requires safetensors weights (pickle .bin is blocked)."
+            f"Model at {target} has no safetensors weights (need a "
+            "model.safetensors file or a model.safetensors.index.json). "
+            "tinct requires safetensors (pickle .bin is blocked)."
         )
     return target.resolve()
+
+
+def _has_safetensors(model_dir: Path) -> bool:
+    """True if the dir holds safetensors weights (single file or sharded)."""
+    if model_dir.is_dir():
+        if (model_dir / "model.safetensors.index.json").is_file():
+            return True
+        return any(model_dir.glob("*.safetensors"))
+    return False
 
 
 def _snapshot_hub(hub_id: str, cache_dir: Path | None) -> Path:

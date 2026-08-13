@@ -162,6 +162,12 @@ def run_train(project: Project, dataset: Path, run_name: str | None,
         run_dir=run_dir,
         lora_rank=train_cfg.lora_r,
         max_loss_threshold=max_loss,
+        num_train_epochs=train_cfg.num_epochs,
+        per_device_batch_size=train_cfg.batch_size,
+        grad_accum_steps=train_cfg.grad_accum_steps,
+        learning_rate=train_cfg.learning_rate,
+        logging_steps=train_cfg.logging_steps,
+        max_seq_length=train_cfg.max_seq_len,
     )
     # Normalize the fail-closed log into metrics.json for the eval gate.
     _materialize_metrics(run_dir)

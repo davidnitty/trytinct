@@ -27,7 +27,12 @@ def test_cleanup_does_not_raise_without_model(tmp_path):
     engine.cleanup()  # should be a no-op, no error
 
 
-def test_load_meta_model_guards_missing_deps(tmp_path):
+def test_load_meta_model_guards_missing_deps(tmp_path, monkeypatch):
+    # Prove the dependency guard fires before any heavy work — regardless of
+    # whether torch happens to be installed in this environment.
+    import tinct.engine.streaming as streaming
+    monkeypatch.setattr(streaming, "ensure_train_deps",
+                        lambda **kw: (_ for _ in ()).throw(MissingDependencyError("train")))
     engine = StreamingInferenceEngine(model_path=tmp_path, chunk_dir=tmp_path)
     with pytest.raises(MissingDependencyError):
-        engine.load_meta_model()  # torch is not installed in the test env
+        engine.load_meta_model()

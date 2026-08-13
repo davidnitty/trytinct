@@ -46,10 +46,16 @@ def test_resolve_model_blocks_missing_index(tmp_path: Path):
         resolve_model(str(bad))
 
 
-def test_resolve_hub_id_requires_huggingface_hub():
-    # huggingface_hub is not installed in the test env -> dep guard fires.
+def test_resolve_hub_id_requires_huggingface_hub(monkeypatch):
+    # Deterministic regardless of whether huggingface_hub is installed: force
+    # the snapshot helper to raise the dep-guard error and assert it propagates.
+    from tinct.storage import paths as paths_mod
+    monkeypatch.setattr(
+        paths_mod, "_snapshot_hub",
+        lambda hub_id, cache_dir: (_ for _ in ()).throw(MissingDependencyError("train")),
+    )
     with pytest.raises(MissingDependencyError):
-        resolve_model("meta-llama/Llama-3.1-8B")
+        resolve_model("meta-llama/Llama-3.2-1B")
 
 
 def test_tinct_paths_full_tree(tmp_path: Path):

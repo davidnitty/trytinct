@@ -10,6 +10,10 @@ from __future__ import annotations
 import importlib
 from typing import Any, TypeVar
 
+from tinct.utils.logging import get_logger
+
+log = get_logger("tinct.engine.deps")
+
 T = TypeVar("T")
 
 
@@ -35,11 +39,20 @@ def ensure_train_deps(quant: str = "qlora") -> None:
     """Verify all packages needed for LoRA/QLoRA training are importable.
 
     Raises :class:`MissingDependencyError` as soon as one is missing.
+    ``bitsandbytes`` is optional: QLoRA falls back to 16-bit LoRA when absent
+    (the trainer handles that gracefully), so it is not a hard requirement.
     """
     for mod in ("torch", "transformers", "trl", "peft", "accelerate", "datasets", "huggingface_hub"):
         import_optional(mod, "train")
     if quant == "qlora":
-        import_optional("bitsandbytes", "train")
+        try:
+            import_optional("bitsandbytes", "train")
+        except MissingDependencyError:
+            # QLoRA unavailable -> trainer will use 16-bit LoRA fallback.
+            log.warning(
+                "[tinct] bitsandbytes not installed; falling back to 16-bit LoRA "
+                "(no 4-bit quantization)."
+            )
 
 
 def ensure_eval_deps() -> None:

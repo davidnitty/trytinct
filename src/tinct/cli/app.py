@@ -99,7 +99,8 @@ def advise(
 
 @app.command("train")
 def train(
-    dataset: Path = typer.Argument(..., help="JSON/JSONL instruction dataset."),
+    dataset: Path | None = typer.Argument(None, help="JSON/JSONL instruction dataset (or use --dataset)."),
+    dataset_opt: Path | None = typer.Option(None, "--dataset", help="Dataset path (alias for the positional arg)."),
     root: Path = typer.Option(".", "--root", help="Project root."),
     run: str | None = typer.Option(None, "--run", help="Run name (defaults to timestamp)."),
     model: str | None = typer.Option(None, "--model", help="Override the configured base model."),
@@ -110,8 +111,11 @@ def train(
     ),
 ) -> None:
     """Validate then fine-tune a Llama adapter (LoRA/QLoRA), fail-closed."""
+    dataset_path = dataset_opt or dataset
+    if dataset_path is None:
+        raise typer.BadParameter("a dataset is required (positional or --dataset)")
     project = _open_project(root)
-    _exit(train_cmd.run_train(project, dataset, run, model,
+    _exit(train_cmd.run_train(project, dataset_path, run, model,
                               method=method, lora_rank_override=lora_rank,
                               max_loss_threshold_override=max_loss_threshold))
 

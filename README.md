@@ -63,25 +63,35 @@ and an artificially low threshold:
 
 ```bash
 pip install -e ".[train]"
-tinct init smoke meta-llama/Llama-3.1-8B
+tinct init smoke meta-llama/Llama-3.2-1B      # requires HF token (gated model)
 cd smoke
-tinct train ../examples/broken_data.jsonl --max-loss-threshold 0.1
+tinct train --dataset ../examples/broken_data.jsonl --max-loss-threshold 0.1
 ```
 
 Expected: the run starts, the loss is garbage, the **Fail-Closed Callback** trips
 almost immediately, and you get:
 
 ```
+[tinct] FATAL: Loss exploded ...
 [tinct] VERDICT: DON'T SHIP (Training failed / fail-closed guard).
 ```
 
-with `runs/<name>/fail_state.json` recording `reason: loss_explosion` and the
-structured logs populating `runs/<name>/train_log.jsonl`.
+with `.tinct/runs/<name>/fail_state.json` recording `reason: loss_explosion` and
+the structured logs populating `.tinct/runs/<name>/train_log.jsonl`.
+
+**CPU-only / no HF token?** Use a tiny non-gated Llama-family model instead —
+this is the exact pipeline that was verified end-to-end on a CPU box:
+
+```bash
+tinct init smoke hf-internal-testing/tiny-random-LlamaForCausalLM
+cd smoke
+tinct train --dataset ../examples/broken_data.jsonl --max-loss-threshold 2.0
+# -> FATAL: Loss 10.38 ... halting immediately. / VERDICT: DON'T SHIP
+```
 
 The same guard logic is also covered by unit tests (`test_sft_trainer.py`) that
-run with **no GPU and no ML dependencies** — the exact trigger is exercised by
-`FailClosedCore` directly.
+run with no ML dependencies installed — `FailClosedCore` is exercised directly.
 
 To let it run past the guard instead, omit `--max-loss-threshold` and watch
-`train_log.jsonl` populate (then it will still halt at the first NaN/Inf/over-
+`train_log.jsonl` populate (it will still halt at the first NaN/Inf/over-
 threshold step).

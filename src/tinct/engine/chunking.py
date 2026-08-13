@@ -47,22 +47,24 @@ class ModelChunker:
             ValueError: If the model lacks a safetensors index (e.g. pickle
                 ``.bin`` weights are present instead) — fail-closed.
         """
-        # Fail-closed: safetensors only, no pickle.
+        # Fail-closed: safetensors only, no pickle. A sharded model provides an
+        # index; a single-file safetensors checkpoint is also accepted.
         index_file = model_path / "model.safetensors.index.json"
-        if not index_file.exists():
+        if not index_file.exists() and not any(model_path.glob("*.safetensors")):
             raise ValueError(
-                "tinct requires a safetensors index file. "
-                "Pickle .bin files are blocked."
+                "tinct requires safetensors weights (a model.safetensors file "
+                "or a model.safetensors.index.json). Pickle .bin files are blocked."
             )
 
-        with open(index_file, "r", encoding="utf-8") as fh:
-            index_data = json.load(fh)
-
-        # The index maps tensor names -> shard file.
-        weight_map = index_data["weight_map"]
-        # Production follow-up: group tensors by measured byte size so a chunk
-        # stays within ``chunk_size_mb`` instead of whole shard files.
-        del weight_map  # referenced for the grouping step above (not yet used)
+        weight_map = {}
+        if index_file.exists():
+            with open(index_file, "r", encoding="utf-8") as fh:
+                index_data = json.load(fh)
+            # The index maps tensor names -> shard file.
+            weight_map = index_data["weight_map"]
+            # Production follow-up: group tensors by measured byte size so a
+            # chunk stays within ``chunk_size_mb`` instead of whole shard files.
+            del weight_map
 
         chunks_manifest: dict = {}
         log.info("Chunking model for low-VRAM streaming: %s", model_path)
