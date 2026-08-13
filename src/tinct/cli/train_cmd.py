@@ -11,8 +11,9 @@ from tinct.core.datadoctor import DataDoctor, DatasetLoadError
 from tinct.core.project import Project
 from tinct.engine.chunking import ModelChunker
 from tinct.engine.deps import MissingDependencyError, ensure_train_deps
-from tinct.engine.hf_trainer import HfLlamaTrainer
+from tinct.engine.hf_trainer import _to_text
 from tinct.storage.paths import get_cache_dir, resolve_model
+from tinct.trainers.sft_trainer import run_sft
 from tinct.utils.logging import get_console
 
 
@@ -29,6 +30,21 @@ def _write_jsonl(records, path: Path) -> None:
     with path.open("w", encoding="utf-8") as fh:
         for rec in records:
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+def _materialize_metrics(run_dir: Path) -> None:
+    """Normalize the trainer's ``train_log.jsonl`` into ``metrics.json`` so the
+    eval gate / ship can read a log history (matches the expected shape)."""
+    log_file = run_dir / "train_log.jsonl"
+    if not log_file.is_file():
+        return
+    entries = []
+    for line in log_file.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            entries.append(json.loads(line))
+    (run_dir / "metrics.json").write_text(
+        json.dumps(entries, indent=2), encoding="utf-8"
+    )
 
 
 def prepare_base_model_chunks(
@@ -116,18 +132,28 @@ def run_train(project: Project, dataset: Path, run_name: str | None,
         console.print(f"[bold red]Model prep blocked:[/] {exc}")
         return 2
 
-    engine = HfLlamaTrainer()
-    result = engine.train(
-        run_name=name,
-        run_dir=run_dir,
-        model=str(model_path),
-        train_records=train_records,
-        valid_records=valid_records,
-        config=train_cfg,
-    )
+    # The Data Doctor validates raw columns; format them into the chat-text
+    # field the fail-closed SFT trainer consumes.
+    text_records = [_to_text(r, train_cfg, True) for r in train_records]
+    text_path = run_dir / "train_text.jsonl"
+    _write_jsonl([{"text": t} for t in text_records], text_path)
 
-    console.print("[bold green]Training complete.[/]")
-    console.print(f"  adapter: {result.adapter_dir}")
-    console.print(f"  metrics: {result.metrics_path}")
+    ok_run = run_sft(
+        model_name_or_path=str(model_path),
+        dataset_path=text_path,
+        run_dir=run_dir,
+        lora_rank=train_cfg.lora_r,
+        max_loss_threshold=project.config.max_loss_threshold,
+    )
+    # Normalize the fail-closed log into metrics.json for the eval gate.
+    _materialize_metrics(run_dir)
+
+    if not ok_run:
+        console.print("[bold red]Training was halted by a fail-closed guard. DO NOT SHIP this run.[/]")
+        console.print(f"  inspect: {run_dir / 'fail_state.json'} (if present)")
+        return 1
+
+    console.print("[bold green]Training complete (fail-closed guards passed).[/]")
+    console.print(f"  adapter: {run_dir / 'adapter'}")
     console.print(f"\nNext: run `tinct eval --run {name}` to gate the checkpoint.")
     return 0
