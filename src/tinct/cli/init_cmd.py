@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tinct.core.project import Project
+from tinct.core.init_project import init_tinct_project
 from tinct.security.signing import SigningKey
 from tinct.utils.logging import get_console
 
 
 def run_init(project_name: str, model: str, root: Path, generate_key: bool) -> None:
     console = get_console()
-    project = Project.create(root / project_name, project_name, model)
+    project = init_tinct_project(root / project_name, model, project_name=project_name)
     console.print(f"[bold green]Initialized project[/] {project_name!r} at {project.root}")
     console.print(f"  model:   {model}")
     console.print(f"  config:  {project.config_path}")

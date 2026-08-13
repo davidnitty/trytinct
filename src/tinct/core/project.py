@@ -147,7 +147,13 @@ class Project:
 
     def refuse_if_unsupported_model(self) -> None:
         """Fail-closed gate before any train/eval work."""
-        detect_model_family(self.config.train.model)
+        family = detect_model_family(self.config.train.model)
+        allowed = self.config.model_families_allowed
+        if allowed and family not in allowed:
+            raise UnsupportedModelFamily(
+                f"Model family {family!r} is not among the allowed families "
+                f"configured in project.yaml: {allowed}"
+            )
 
     def create_run(self, name: str) -> Path:
         run_dir = self.run_dir(name)

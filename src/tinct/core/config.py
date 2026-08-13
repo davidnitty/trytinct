@@ -24,7 +24,7 @@ except ImportError:  # pragma: no cover
     )
 
 CONFIG_FILENAME = "project.yaml"  # located under the project's .tinct dir
-CONFIG_VERSION = "1"
+CONFIG_VERSION = "0.1.0"
 
 # Supported dataset schemas for instruction tuning.
 DataFormat = Literal["instruct", "alpaca", "chatml"]
@@ -103,9 +103,14 @@ class SecurityConfig(BaseModel):
 class ProjectConfig(BaseModel):
     """Top-level project configuration persisted to .tinct/project.yaml."""
 
-    version: Literal["1"] = CONFIG_VERSION
+    version: str = CONFIG_VERSION
     project_name: str
     created_at: str = Field(default_factory=lambda: _dt.datetime.now(_dt.timezone.utc).isoformat())
+    # User-facing policy knobs written by `tinct init`.
+    model_families_allowed: list[str] = Field(default_factory=lambda: ["llama"])
+    default_lora_rank: int = Field(default=16, ge=1)
+    max_loss_threshold: float = Field(default=10.0, ge=0.0)
+    fail_closed: bool = True
     data: DataConfig = Field(default_factory=DataConfig)
     train: TrainConfig
     eval: EvalConfig = Field(default_factory=EvalConfig)
