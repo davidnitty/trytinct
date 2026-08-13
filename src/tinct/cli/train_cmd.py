@@ -78,7 +78,8 @@ def prepare_base_model_chunks(
 
 def run_train(project: Project, dataset: Path, run_name: str | None,
               model_override: str | None, method: str = "sft",
-              lora_rank_override: int | None = None) -> int:
+              lora_rank_override: int | None = None,
+              max_loss_threshold_override: float | None = None) -> int:
     """Validate, split, train. Returns 0 on success, non-zero otherwise."""
     console = get_console()
 
@@ -141,18 +142,26 @@ def run_train(project: Project, dataset: Path, run_name: str | None,
         console.print(f"[bold red]Model prep blocked:[/] {exc}")
         return 2
 
-    # The Data Doctor validates raw columns; format them into the chat-text
-    # field the fail-closed SFT trainer consumes.
-    text_records = [_to_text(r, train_cfg, True) for r in train_records]
+    # The Data Doctor validates the schema (columns or a pre-formatted text
+    # field); build the chat-text dataset the fail-closed SFT trainer consumes.
+    if doctor.format_used == "text":
+        text_records = [{"text": str(r.get("text", ""))} for r in train_records]
+    else:
+        text_records = [{"text": _to_text(r, train_cfg, True)} for r in train_records]
     text_path = run_dir / "train_text.jsonl"
-    _write_jsonl([{"text": t} for t in text_records], text_path)
+    _write_jsonl(text_records, text_path)
+
+    max_loss = (max_loss_threshold_override
+                if max_loss_threshold_override is not None
+                else project.config.max_loss_threshold)
+    console.print(f"[bold]Fail-closed loss threshold:[/] {max_loss}")
 
     ok_run = run_sft(
         model_name_or_path=str(model_path),
         dataset_path=text_path,
         run_dir=run_dir,
         lora_rank=train_cfg.lora_r,
-        max_loss_threshold=project.config.max_loss_threshold,
+        max_loss_threshold=max_loss,
     )
     # Normalize the fail-closed log into metrics.json for the eval gate.
     _materialize_metrics(run_dir)

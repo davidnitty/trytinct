@@ -99,3 +99,19 @@ def test_deterministic_split(project, sample_dataset: Path):
     assert a_train == b_train
     assert a_valid == b_valid
     assert len(a_train) + len(a_valid) == len(records)
+
+
+def test_text_format_dataset_auto_detected(project, tmp_path: Path):
+    data = tmp_path / "text.jsonl"
+    lines = [
+        {"text": "<|begin_of_text|>user: q<|eot_id|>assistant: a"},
+        {"text": "<|begin_of_text|>user: q2<|eot_id|>assistant: a2"},
+    ]
+    lines += [{"text": f"row {i} text"} for i in range(20)]
+    data.write_text("\n".join(json.dumps(r) for r in lines), encoding="utf-8")
+
+    doctor = DataDoctor(project.config.data, max_seq_len=2048, seed=42)
+    report, records = doctor.run(data)
+    assert report.passed
+    assert doctor.format_used == "text"
+    assert len(records) == 22

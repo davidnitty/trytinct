@@ -105,11 +105,15 @@ def train(
     model: str | None = typer.Option(None, "--model", help="Override the configured base model."),
     method: str = typer.Option("sft", "--method", help="Training method (only 'sft' in V0)."),
     lora_rank: int | None = typer.Option(None, "--lora-rank", help="Override the LoRA rank."),
+    max_loss_threshold: float | None = typer.Option(
+        None, "--max-loss-threshold", help="Override the fail-closed loss threshold."
+    ),
 ) -> None:
     """Validate then fine-tune a Llama adapter (LoRA/QLoRA), fail-closed."""
     project = _open_project(root)
     _exit(train_cmd.run_train(project, dataset, run, model,
-                              method=method, lora_rank_override=lora_rank))
+                              method=method, lora_rank_override=lora_rank,
+                              max_loss_threshold_override=max_loss_threshold))
 
 
 @app.command("eval")

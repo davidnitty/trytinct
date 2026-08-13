@@ -33,6 +33,8 @@ class DataDoctor:
         self.config = config
         self.max_seq_len = max_seq_len
         self.seed = seed
+        # Which schema the last run() validated against ("instruct"/"text").
+        self.format_used: str = config.format
 
     # -- loading ------------------------------------------------------------
 
@@ -63,6 +65,25 @@ class DataDoctor:
 
     # -- rules --------------------------------------------------------------
 
+    def _detect_format(self, records: List[Dict[str, Any]]) -> None:
+        """Decide the effective schema: explicit ``text`` format, or auto-detect
+        a ``text``-only dataset (already chat-formatted) vs column-based."""
+        cfg = self.config
+        first = records[0]
+        if cfg.format == "text" or (
+            cfg.format in ("instruct", "alpaca", "chatml")
+            and "text" in first
+            and (cfg.instruction_column not in first or cfg.output_column not in first)
+        ):
+            self.format_used = "text"
+
+    def _content_of(self, rec: Dict[str, Any]) -> str:
+        """The text used for length/token checks, per the effective schema."""
+        cfg = self.config
+        if self.format_used == "text":
+            return str(rec.get("text", ""))
+        return str(rec.get(cfg.instruction_column, "")) + str(rec.get(cfg.output_column, ""))
+
     def run(self, path: Path) -> Tuple[RuleReport, List[Dict[str, Any]]]:
         """Validate the dataset and return (report, records)."""
         report = RuleReport("Data Doctor")
@@ -79,6 +100,10 @@ class DataDoctor:
             report.add(error("data.not_empty", "Dataset not empty",
                              "Dataset contains zero records."))
             return report, []
+
+        self._detect_format(records)
+        report.add(info("data.format", "Dataset schema",
+                        f"Validated as {self.format_used!r} format."))
 
         report.add(
             ok("data.min_rows", "Minimum row count",
@@ -100,11 +125,14 @@ class DataDoctor:
     # -- individual checks --------------------------------------------------
 
     def _check_columns(self, report: RuleReport, records: List[Dict[str, Any]]) -> None:
-        cfg = self.config
-        required = {
-            cfg.instruction_column: "instruction column",
-            cfg.output_column: "output column",
-        }
+        if self.format_used == "text":
+            required = {"text": "text field"}
+        else:
+            cfg = self.config
+            required = {
+                cfg.instruction_column: "instruction column",
+                cfg.output_column: "output column",
+            }
         missing = [name for name, _ in required.items() if name not in records[0]]
         if missing:
             report.add(error(
@@ -118,6 +146,20 @@ class DataDoctor:
         report.add(ok("data.columns", "Required columns present"))
 
     def _check_empty_fields(self, report: RuleReport, records: List[Dict[str, Any]]) -> None:
+        total = len(records)
+        if self.format_used == "text":
+            empty = [i for i, rec in enumerate(records)
+                     if not str(rec.get("text", "") or "").strip()]
+            label = "data.empty_text"
+            name = "Text fields populated"
+            if empty:
+                report.add(error(label, name,
+                                 f"{len(empty)}/{total} rows have an empty text field.",
+                                 meta={"row_indices": empty[:20]}))
+            else:
+                report.add(ok(label, name))
+            return
+
         cfg = self.config
         empty_instr = []
         empty_out = []
@@ -126,7 +168,6 @@ class DataDoctor:
                 empty_instr.append(i)
             if not str(rec.get(cfg.output_column, "") or "").strip():
                 empty_out.append(i)
-        total = len(records)
         if empty_instr:
             report.add(error(
                 "data.empty_instruction",
@@ -164,11 +205,7 @@ class DataDoctor:
             report.add(ok("data.duplicates", "Duplicate rows", "No exact duplicates"))
 
     def _check_lengths(self, report: RuleReport, records: List[Dict[str, Any]]) -> None:
-        cfg = self.config
-        lengths = [
-            len(str(rec.get(cfg.instruction_column, ""))) + len(str(rec.get(cfg.output_column, "")))
-            for rec in records
-        ]
+        lengths = [len(self._content_of(rec)) for rec in records]
         n = len(lengths)
         mean = statistics.mean(lengths)
         longest = max(lengths)
@@ -179,12 +216,10 @@ class DataDoctor:
         ))
 
     def _check_token_estimate(self, report: RuleReport, records: List[Dict[str, Any]]) -> None:
-        cfg = self.config
         max_tokens = self.max_seq_len
         worst = 0
         for rec in records:
-            text = str(rec.get(cfg.instruction_column, "")) + str(rec.get(cfg.output_column, ""))
-            est = len(text) // APPROX_CHARS_PER_TOKEN
+            est = len(self._content_of(rec)) // APPROX_CHARS_PER_TOKEN
             worst = max(worst, est)
         if worst > max_tokens:
             report.add(warn(
@@ -198,8 +233,11 @@ class DataDoctor:
                           f"Estimated max {worst} tokens <= {max_tokens}"))
 
     def _check_output_diversity(self, report: RuleReport, records: List[Dict[str, Any]]) -> None:
-        cfg = self.config
-        outputs = [str(rec.get(cfg.output_column, "")) for rec in records]
+        if self.format_used == "text":
+            outputs = [str(rec.get("text", "")) for rec in records]
+        else:
+            cfg = self.config
+            outputs = [str(rec.get(cfg.output_column, "")) for rec in records]
         unique = len({o for o in outputs if o.strip()})
         total = len(outputs)
         ratio = unique / total if total else 0.0

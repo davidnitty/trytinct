@@ -55,3 +55,33 @@ If a heavy engine is missing, the command fails with a clear
 > **Note:** actually fine-tuning Llama-3.1-8B requires a suitable GPU and the
 > model weights. The core CLI (init/validate/eval/ship/security check) runs on
 > CPU with no ML dependencies installed.
+
+## V0.1-GPU milestone: prove the fail-closed guard (no 4-hour run)
+
+Trigger the loss-explosion guard intentionally with the bundled broken dataset
+and an artificially low threshold:
+
+```bash
+pip install -e ".[train]"
+tinct init smoke meta-llama/Llama-3.1-8B
+cd smoke
+tinct train ../examples/broken_data.jsonl --max-loss-threshold 0.1
+```
+
+Expected: the run starts, the loss is garbage, the **Fail-Closed Callback** trips
+almost immediately, and you get:
+
+```
+[tinct] VERDICT: DON'T SHIP (Training failed / fail-closed guard).
+```
+
+with `runs/<name>/fail_state.json` recording `reason: loss_explosion` and the
+structured logs populating `runs/<name>/train_log.jsonl`.
+
+The same guard logic is also covered by unit tests (`test_sft_trainer.py`) that
+run with **no GPU and no ML dependencies** — the exact trigger is exercised by
+`FailClosedCore` directly.
+
+To let it run past the guard instead, omit `--max-loss-threshold` and watch
+`train_log.jsonl` populate (then it will still halt at the first NaN/Inf/over-
+threshold step).

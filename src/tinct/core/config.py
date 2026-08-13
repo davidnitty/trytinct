@@ -27,7 +27,7 @@ CONFIG_FILENAME = "project.yaml"  # located under the project's .tinct dir
 CONFIG_VERSION = "0.1.0"
 
 # Supported dataset schemas for instruction tuning.
-DataFormat = Literal["instruct", "alpaca", "chatml"]
+DataFormat = Literal["instruct", "alpaca", "chatml", "text"]
 
 # Supported quantization strategies for LoRA training.
 QuantMethod = Literal["lora", "qlora"]

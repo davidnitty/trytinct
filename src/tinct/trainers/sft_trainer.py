@@ -35,6 +35,48 @@ def loss_is_fatal(loss: float, max_loss_threshold: float) -> bool:
     return math.isnan(loss) or math.isinf(loss) or loss > max_loss_threshold
 
 
+class FailClosedCore:
+    """Import-friendly fail-closed loss guard (no transformers import needed).
+
+    ``run_sft`` combines this with ``transformers.TrainerCallback`` inside a
+    lazily-imported subclass; tests can exercise this class directly with a
+    plain state/control mock, which is exactly how the V0.1-GPU smoke test
+    proves the guard fires before any real training.
+    """
+
+    def __init__(self, threshold: float, log_path: Path, fail_path: Path) -> None:
+        self.threshold = threshold
+        self.log_path = log_path
+        self.fail_path = fail_path
+        self.aborted = False
+
+    def on_log(self, state, control, logs=None) -> bool:
+        """Handle one log entry. Returns True when the run must halt."""
+        if not logs:
+            return False
+
+        step = getattr(state, "global_step", 0)
+        with open(self.log_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"step": step, **logs}) + "\n")
+
+        loss = logs.get("loss") or logs.get("eval_loss")
+        if loss is None:
+            return False
+        if loss_is_fatal(float(loss), self.threshold):
+            log.error("[tinct] FATAL: Loss %s; halting immediately.", loss)
+            self.aborted = True
+            control.should_training_stop = True
+            with open(self.fail_path, "w", encoding="utf-8") as fh:
+                json.dump({
+                    "reason": "loss_explosion",
+                    "value": str(loss),
+                    "step": step,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }, fh)
+            return True
+        return False
+
+
 def run_sft(
     model_name_or_path: str,
     dataset_path: Path,
@@ -69,34 +111,14 @@ def run_sft(
     log_file = run_dir / "train_log.jsonl"
     fail_state_file = run_dir / "fail_state.json"
 
-    # --- 3. Fail-closed callback ---
-    class TinctFailClosedCallback(TrainerCallback):
+    # --- 3. Fail-closed callback (logic lives in FailClosedCore, which is
+    # tested directly without any ML dependency) ---
+    class TinctFailClosedCallback(TrainerCallback, FailClosedCore):
         def __init__(self, threshold: float, log_path: Path, fail_path: Path):
-            self.threshold = threshold
-            self.log_path = log_path
-            self.fail_path = fail_path
-            self.aborted = False
+            FailClosedCore.__init__(self, threshold, log_path, fail_path)
 
         def on_log(self, args, state, control, logs=None, **kwargs):
-            if not logs:
-                return
-
-            # Structured log for the evidence bundle.
-            with open(self.log_path, "a", encoding="utf-8") as fh:
-                fh.write(json.dumps({"step": state.global_step, **logs}) + "\n")
-
-            loss = logs.get("loss") or logs.get("eval_loss")
-            if loss is not None and loss_is_fatal(float(loss), self.threshold):
-                log.error("[tinct] FATAL: Loss %s; halting immediately.", loss)
-                self.aborted = True
-                control.should_training_stop = True
-                with open(self.fail_path, "w", encoding="utf-8") as fh:
-                    json.dump({
-                        "reason": "loss_explosion",
-                        "value": str(loss),
-                        "step": state.global_step,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    }, fh)
+            return FailClosedCore.on_log(self, state, control, logs)
 
     # --- 4. Load tokenizer & model ---
     log.info("[tinct] Loading tokenizer and model: %s", model_name_or_path)
