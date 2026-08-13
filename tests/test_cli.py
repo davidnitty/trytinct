@@ -112,3 +112,20 @@ def test_ship_refuses_if_eval_failed(tmp_path: Path):
     assert result.exit_code == 2
     assert "DON'T_SHIP" in result.output
 
+
+def test_security_check_run_verifies_signature(tmp_path: Path):
+    proj = tmp_path / "proj"
+    runner.invoke(app, ["init", "proj", "meta-llama/Llama-3.1-8B", "--root", str(tmp_path)])
+    _seed_run(proj, "run_1", final_eval_loss=1.2, eval_status="PASS")
+    assert runner.invoke(app, ["ship", "--run", "run_1", "--root", str(proj)]).exit_code == 0
+    result = runner.invoke(app, ["security", "check", "--run", "run_1", "--root", str(proj)])
+    assert result.exit_code == 0, result.output
+    assert "Signature valid" in result.output
+
+
+def test_security_check_run_missing_evidence(tmp_path: Path):
+    proj = tmp_path / "proj"
+    runner.invoke(app, ["init", "proj", "meta-llama/Llama-3.1-8B", "--root", str(tmp_path)])
+    result = runner.invoke(app, ["security", "check", "--run", "nope", "--root", str(proj)])
+    assert result.exit_code == 1
+

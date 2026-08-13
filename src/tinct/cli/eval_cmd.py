@@ -39,13 +39,19 @@ def run_eval(project, run_name: str | None) -> int:
         console.print("[tinct] Reason: Training aborted by fail-closed guard.\n")
         return 2
 
-    eval_cfg = project.config.eval
-    gate = EvalGate(eval_cfg)
-    history = _load_history(run_dir)
     adapter_dir = run_dir / "adapter"
 
-    # 1. Loss gate (informational + secondary): from in-run history.
-    report = gate.evaluate(history or [])
+    # 1. Loss gate (secondary/informational): only applies when an eval metric
+    # was actually recorded during training. With no eval split, the generation
+    # smoke test below is the authoritative gate.
+    eval_cfg = project.config.eval
+    gate = EvalGate(eval_cfg)
+    history = _load_history(run_dir) or []
+    metric_recorded = any(
+        isinstance(e, dict) and eval_cfg.metric in e and e[eval_cfg.metric] is not None
+        for e in history
+    )
+    report = gate.evaluate(history)
     print_report(console, report)
 
     # 2. Generation smoke test: proves the adapter generates non-empty,
@@ -74,8 +80,8 @@ def run_eval(project, run_name: str | None) -> int:
         console.print("\n[tinct] VERDICT: DON'T SHIP")
         console.print("[tinct] Reason: Generation smoke test failed.\n")
         return 2
-    if not report.passed:
-        console.print("[bold red]Loss gate did not pass; checkpoint must not ship.[/]")
+    if metric_recorded and not report.passed:
+        console.print("[bold red]Recorded loss gate did not pass; checkpoint must not ship.[/]")
         return 2
     console.print("\n[tinct] VERDICT: READY TO SHIP")
     console.print("Next: `tinct ship --run {run_dir.name}` to certify.\n")

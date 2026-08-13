@@ -35,12 +35,29 @@ security_app.add_typer(key_app, name="key")
 @security_app.command("check")
 def security_check(
     root: Path = typer.Option(".", "--root", help="Project root."),
+    run: str | None = typer.Option(None, "--run", help="Verify the evidence signature for a specific run."),
 ) -> None:
     """Audit the project's security posture (fail-closed)."""
     console = get_console()
     auditor = SecurityAuditor(root, env_path=root / ".env.example")
     report = auditor.run()
     print_report(console, report)
+
+    # Explicit per-run evidence verification: `security check --run <id>`.
+    if run:
+        from tinct.security.evidence import EvidenceReport
+        from tinct.storage.paths import TinctPaths
+        ev_path = TinctPaths(root).evidence_dir / f"{run}_evidence.json"
+        if not ev_path.is_file():
+            console.print(f"[red]No evidence file for run {run!r}: {ev_path}[/]")
+            raise typer.Exit(code=1)
+        rep = EvidenceReport.load(ev_path)
+        if rep.verify():
+            console.print(f"[bold green]Signature valid. Manifest verified for run {run!r}.[/]")
+        else:
+            console.print(f"[bold red]Signature INVALID for run {run!r}.[/]")
+            raise typer.Exit(code=1)
+
 
 
 @key_app.command("generate")
