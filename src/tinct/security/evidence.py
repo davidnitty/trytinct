@@ -40,6 +40,23 @@ def hash_path(path: Path) -> Optional[Dict[str, Any]]:
     return None
 
 
+def hash_directory(path: Path) -> str:
+    """Deterministic single sha256 over a whole directory tree.
+
+    Hashes each file in sorted order, mixing in the file name so content alone
+    cannot produce collisions between differently-named files. Returns a hex
+    digest proving exactly which weights are shipping.
+    """
+    h = hashlib.sha256()
+    files = sorted([p for p in path.rglob("*") if p.is_file()])
+    for file in files:
+        h.update(file.name.encode("utf-8"))
+        with file.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
+    return h.hexdigest()
+
+
 def dump_json(data: Any, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")

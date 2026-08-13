@@ -1,25 +1,17 @@
-"""``tinct ship`` — compute the SHIP / DON'T-SHIP decision + signed evidence."""
+"""``tinct ship`` — the certification engine: SHIP/DON'T-SHIP verdict + signed evidence."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from tinct.cli.eval_cmd import resolve_run
 from tinct.cli.render import print_decision
 from tinct.core.datadoctor import DataDoctor
 from tinct.core.project import Project
-from tinct.evals.gate import EvalGate
-from tinct.security.evidence import EvidenceReport, dump_json, hash_path
+from tinct.security.evidence import EvidenceReport, hash_directory, hash_path
 from tinct.security.signing import SigningKey
 from tinct.utils.logging import get_console
-
-
-def _load_history(run_dir: Path):
-    metrics_path = run_dir / "metrics.json"
-    if metrics_path.is_file():
-        import json
-        return json.loads(metrics_path.read_text(encoding="utf-8"))
-    return []
 
 
 def _data_report(project: Project, run_dir: Path) -> dict:
@@ -39,31 +31,42 @@ def run_ship(project: Project, run_name: str | None) -> int:
         console.print("[bold red]No run found to ship.[/] Run `tinct train` first.")
         return 1
 
-    history = _load_history(run_dir)
-    eval_cfg = project.config.eval
-    gate = EvalGate(eval_cfg)
-    eval_report = gate.evaluate(history)
-    eval_pass = eval_report.passed
-    print_decision(console, "SHIP" if eval_pass else "DON'T_SHIP")
+    # 1. Fail-closed: a run aborted by the training guard must never ship.
+    if (run_dir / "fail_state.json").exists():
+        print_decision(console, "DON'T_SHIP")
+        console.print("[tinct] Reason: Training aborted by fail-closed guard.\n")
+        return 2
 
-    if not eval_pass:
-        console.print("[bold red]Reason: the eval gate failed (fail-closed).[/]")
+    # 2. Eval check: the generation smoke test must have passed.
+    eval_report_path = run_dir / "eval_report.json"
+    if not eval_report_path.is_file():
+        console.print("[red]Error: Run `tinct eval` before shipping.[/]")
+        return 1
+    eval_data = json.loads(eval_report_path.read_text(encoding="utf-8"))
+    if eval_data.get("status") != "PASS":
+        print_decision(console, "DON'T_SHIP")
+        console.print("[tinct] Reason: Generation smoke test failed.\n")
+        return 2
+
+    # 3. Hash the adapter — prove exactly which weights are shipping.
+    adapter_dir = run_dir / "adapter"
+    if not adapter_dir.is_dir():
+        console.print("[red]Error: no adapter directory in the run.[/]")
+        return 1
+    adapter_hash = hash_directory(adapter_dir)
 
     data_report = _data_report(project, run_dir)
-
     artifacts = {
         "train_data.jsonl": hash_path(run_dir / "train.jsonl"),
         "valid_data.jsonl": hash_path(run_dir / "valid.jsonl"),
         "config": hash_path(project.config_path),
+        "adapter": hash_path(adapter_dir),
+        "adapter_sha256": {"path": str(adapter_dir), "sha256": adapter_hash},
+        "eval_report.json": hash_path(eval_report_path),
     }
-    adapter_dir = run_dir / "adapter"
-    if adapter_dir.is_dir():
-        artifacts["adapter"] = hash_path(adapter_dir)
     metrics_path = run_dir / "metrics.json"
     if metrics_path.is_file():
         artifacts["metrics.json"] = hash_path(metrics_path)
-    # Base-model chunk manifest: pins exactly which weights were used in
-    # training (fail-closed if a run was trained without it — evidence gap).
     chunk_manifest = run_dir / "base_model_chunks.json"
     if chunk_manifest.is_file():
         artifacts["base_model_chunks.json"] = hash_path(chunk_manifest)
@@ -72,16 +75,16 @@ def run_ship(project: Project, run_name: str | None) -> int:
         project_name=project.config.project_name,
         model=project.config.train.model,
         family="llama",
-        decision="SHIP" if eval_pass else "DON'T_SHIP",
+        decision="SHIP",
         artifacts=artifacts,
         data_report=data_report,
-        eval_report=eval_report.to_dict(),
+        eval_report=eval_data,
         metrics={"n_runs": 1},
         config=project.config.model_dump(mode="json"),
     )
 
     # Cryptographic evidence is required to ship (secure by default).
-    if report.decision == "SHIP" and project.config.security.sign_evidence:
+    if project.config.security.sign_evidence:
         try:
             key = SigningKey.load(project.keys_dir, project.config.security.key_name)
         except FileNotFoundError as exc:
@@ -90,16 +93,13 @@ def run_ship(project: Project, run_name: str | None) -> int:
                           f"{project.config.security.key_name}` first.")
             return 1
         report.sign(key)
-        ok = report.verify()
-        if not ok:
+        if not report.verify():
             console.print("[bold red]Evidence signature verification failed; refusing to ship.[/]")
             return 1
         console.print("[green]Evidence signed and signature verified.[/]")
-    elif report.decision != "SHIP":
-        console.print("[yellow]Produced unsigned evidence for a failed gate (no ship).[/]")
 
     path = report.write(project.evidence_dir, run_dir.name)
-    console.print(f"[bold green]Evidence report:[/] {path}")
-    console.print(f"  decision: {report.decision}")
-    console.print(f"  gate: {eval_report.passed and 'PASS' or 'FAIL'}")
-    return 0 if report.decision == "SHIP" else 1
+    print_decision(console, "SHIP")
+    console.print(f"[bold green]Evidence signed and saved:[/] {path}")
+    console.print(f"  adapter_sha256: {adapter_hash}")
+    return 0

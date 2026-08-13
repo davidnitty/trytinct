@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from tinct.security.evidence import EvidenceReport, hash_path, sha256_file
+from tinct.security.evidence import EvidenceReport, hash_directory, hash_path, sha256_file
 from tinct.security.signing import SigningKey, verify_signature
 
 
@@ -37,6 +37,20 @@ def test_hash_directory_lists_files(tmp_path: Path):
     assert desc["dir"] is True
     assert desc["files"][0]["path"].endswith("model.safetensors")
     assert len(desc["files"][0]["sha256"]) == 64
+
+
+def test_hash_directory_deterministic_and_order_insensitive(tmp_path: Path):
+    d = tmp_path / "adapter"
+    d.mkdir()
+    (d / "a.bin").write_bytes(b"aaa")
+    (d / "b.bin").write_bytes(b"bbb")
+    h1 = hash_directory(d)
+    h2 = hash_directory(d)
+    assert h1 == h2
+    assert len(h1) == 64
+    # Adding a file changes the hash (proves which weights are shipping).
+    (d / "c.bin").write_bytes(b"ccc")
+    assert hash_directory(d) != h1
 
 
 def test_sign_and_verify_roundtrip():

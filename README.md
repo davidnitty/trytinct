@@ -56,6 +56,39 @@ If a heavy engine is missing, the command fails with a clear
 > model weights. The core CLI (init/validate/eval/ship/security check) runs on
 > CPU with no ML dependencies installed.
 
+## The V0.1 happy path (acceptance test, GPU box)
+
+The full certification loop — train → eval (generation smoke test) → ship
+(signed evidence):
+
+```bash
+pip install -e ".[train]"
+tinct init demo meta-llama/Llama-3.2-1B     # needs HF token (gated model)
+cd demo
+cp ../examples/good_data.jsonl .
+tinct train --dataset good_data.jsonl --max-loss-threshold 10.0
+tinct eval                                  # runs generation smoke test
+tinct ship                                  # hashes adapter + signs evidence
+```
+
+What happens:
+
+1. `tinct train` — validates data, chunks + hashes the base model, fine-tunes
+   with the fail-closed loss guard (threshold from `--max-loss-threshold`).
+2. `tinct eval` — the **generation smoke test** loads base model + adapter,
+   runs the 3 prompts, and fails the gate on empty or looping text; writes
+   `.tinct/runs/<name>/eval_report.json`.
+3. `tinct ship` — the **certification engine**:
+   - refuses if `fail_state.json` exists (guard tripped) → `DON'T SHIP` (exit 2)
+   - requires `eval_report.json` with `status: PASS` → else `DON'T SHIP`
+   - hashes the adapter (`adapter_sha256`, deterministic), signs the evidence
+     manifest with Ed25519, and saves it under `.tinct/evidence/`
+   - prints `VERDICT: SHIP`
+
+`examples/good_data.jsonl` is a 24-row Llama-3 chat-template dataset for the
+happy path; `examples/broken_data.jsonl` is the garbage dataset that trips the
+loss guard.
+
 ## V0.1-GPU milestone: prove the fail-closed guard (no 4-hour run)
 
 Trigger the loss-explosion guard intentionally with the bundled broken dataset
