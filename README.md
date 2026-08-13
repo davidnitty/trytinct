@@ -103,6 +103,25 @@ src/tinct/
 - `examples/good_data.jsonl` — 24 rows of Llama-3 chat templates (happy path).
 - `examples/broken_data.jsonl` — garbage data that trips the loss guard.
 
+## The real-GPU verification (closing V0.1)
+
+The true acceptance test runs the same loop on the **actual target model**
+(`Llama-3.1-8B`, or `Llama-3.2-1B` to cut GPU time ~8x). One command on a GPU
+box (checks GPU + HF token first, then init → validate → train → eval → ship →
+verify signature, exiting 0 only on a verified SHIP):
+
+```bash
+bash scripts/gpu_verify.sh meta-llama/Llama-3.1-8B 10.0
+# or: bash scripts/gpu_verify.sh meta-llama/Llama-3.2-1B 10.0   (fastest)
+```
+
+Prereqs on that box: NVIDIA GPU, `pip install -e ".[train]"`, and a Hugging
+Face token (`huggingface-cli login` or `HF_TOKEN`) — Llama models are gated.
+
+There is also a `.github/workflows/gpu-verify.yml` (workflow_dispatch) that
+runs the same script on a self-hosted GPU runner (label `gpu`, `HF_TOKEN`
+secret) — see the workflow comments to enable it.
+
 ## Docs
 
 - [`BACKEND_STRUCTURE_AND_SECURITY.md`](docs/BACKEND_STRUCTURE_AND_SECURITY.md)

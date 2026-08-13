@@ -1,0 +1,41 @@
+name: GPU Verify
+
+# Run the real V0.1 acceptance test on a GPU machine.
+#
+# GitHub-hosted runners have no GPU, so this workflow targets a SELF-HOSTED
+# runner that has an NVIDIA GPU and is registered with the label `gpu`.
+#
+# To use:
+#   1. On your GPU box: `gh run register` (label: gpu), install Python 3.11+,
+#      and set an HF_TOKEN secret on the repo (gated Llama models).
+#   2. Dispatch: Actions -> "GPU Verify" -> Run workflow -> choose model.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "HF model id to certify"
+        required: false
+        default: "meta-llama/Llama-3.2-1B"
+      loss_threshold:
+        description: "Fail-closed loss threshold"
+        required: false
+        default: "10.0"
+
+jobs:
+  verify:
+    runs-on: [self-hosted, gpu, linux]
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install tinct (train)
+        run: pip install -e ".[train]"
+      - name: Run real GPU verification
+        run: |
+          bash scripts/gpu_verify.sh \
+            "${{ inputs.model }}" \
+            "${{ inputs.loss_threshold }}"
