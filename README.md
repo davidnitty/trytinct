@@ -147,7 +147,11 @@ secret) — see the workflow comments to enable it.
 
 - **V0 (current):** Llama LoRA/QLoRA end-to-end with signed ship evidence.
 - **V0.2:** DPO with the **Reward Inversion Guard** (`tinct train --method dpo`
-  on `prompt/chosen/rejected` data — `examples/dpo_data.jsonl`).
+  on `prompt/chosen/rejected` data — `examples/dpo_data.jsonl`). The guard
+  halts on persistent reward inversion and `tinct ship` refuses to certify any
+  run whose final reward margin is non-positive — so a DPO SHIP carries
+  cryptographic proof that **chosen > rejected** (`dpo_metrics.json` is folded
+  into the signed evidence).
 - **V2:** Qwen optimizations (Unsloth, GRPO).
 - **V3:** DeepSeek MoE/reasoning.
 

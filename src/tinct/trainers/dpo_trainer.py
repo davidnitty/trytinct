@@ -9,9 +9,12 @@ The **Reward Inversion Guard** monitors DPO rewards every log step and halts
 the run once ``rejected`` consistently outranks ``chosen``, writing
 ``fail_state.json`` (``reason: reward_inversion``) so the run can never ship.
 
-The guard logic lives in :class:`RewardInversionCore` — an import-friendly,
-unit-testable class with no heavy ML dependency. The model loading and training
-run lazily inside :func:`run_dpo`.
+:class:`RewardInversionCore` is a **pure, import-friendly** tracker (no ML
+dependency, no file I/O): it accumulates the reward trajectory, tracks
+consecutive inversions, and produces :meth:`final_metrics` — the evidence that
+answers *"did alignment happen?"*. The heavy ML path (and the file I/O) runs
+lazily inside :func:`run_dpo`, which persists ``dpo_metrics.json`` on success
+**and** on a guard halt, so even an aborted run leaves an auditable trail.
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 from tinct.engine.deps import ensure_train_deps
 from tinct.utils.logging import get_logger
@@ -31,59 +35,80 @@ _REJECTED_KEYS = ("rewards/rejected", "rewards_rejected")
 
 
 class RewardInversionCore:
-    """Import-friendly DPO reward-inversion guard (no transformers import).
+    """Pure DPO reward monitor — tracks inversions AND the reward trajectory.
 
-    :meth:`on_log` is called for each training log. It persists a structured
-    log, tracks how many consecutive steps ``rejected > chosen``, and after a
-    tolerance threshold returns True (and writes ``fail_state.json``) so the
-    run is killed and marked DON'T SHIP.
+    Import-friendly and GPU-free: feed one log step at a time via
+    :meth:`observe` (or :meth:`on_log` when you have the raw log dict), then
+    read :meth:`final_metrics` for the evidence bundle.
     """
 
-    def __init__(self, log_path: Path, fail_path: Path, threshold: int = 3) -> None:
-        self.log_path = log_path
-        self.fail_path = fail_path
-        self.threshold = threshold
-        self.inversion_count = 0
+    def __init__(self, inversion_threshold: int = 3) -> None:
+        self.inversion_threshold = inversion_threshold
+        self.consecutive_inversions = 0
         self.aborted = False
+        self.reason: Optional[str] = None
+        # Reward trajectory (per logged step).
+        self.margins: list[dict] = []
 
-    def on_log(self, state, control, logs=None) -> bool:
-        """Handle one log entry. Returns True when the run must halt."""
-        if not logs:
-            return False
+    # -- feeding ------------------------------------------------------------
 
-        step = getattr(state, "global_step", 0)
-        with open(self.log_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"step": step, **logs}) + "\n")
-
-        chosen = _first_present(logs, _CHOSEN_KEYS)
-        rejected = _first_present(logs, _REJECTED_KEYS)
+    def observe(self, chosen, rejected, step: int) -> None:
+        """Feed one log step. Handles None (missing rewards) gracefully."""
         if chosen is None or rejected is None:
-            return False
-        chosen, rejected = float(chosen), float(rejected)
+            return  # missing rewards: skip, don't count as an inversion
+
+        chosen = float(chosen)
+        rejected = float(rejected)
+        margin = chosen - rejected
+        self.margins.append({
+            "step": step,
+            "chosen": chosen,
+            "rejected": rejected,
+            "margin": margin,
+        })
 
         if rejected > chosen:
-            self.inversion_count += 1
-            log.warning("[tinct] Reward Inversion at step %s (chosen %.4f < rejected %.4f)",
-                        step, chosen, rejected)
-            if self.inversion_count >= self.threshold:
-                log.error("[tinct] FATAL: model is anti-aligning (preferring bad answers); halting.")
+            self.consecutive_inversions += 1
+            if self.consecutive_inversions >= self.inversion_threshold:
                 self.aborted = True
-                control.should_training_stop = True
-                with open(self.fail_path, "w", encoding="utf-8") as fh:
-                    json.dump({
-                        "reason": "reward_inversion",
-                        "chosen_reward": chosen,
-                        "rejected_reward": rejected,
-                        "step": step,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    }, fh)
-                return True
+                self.reason = "reward_inversion"
         else:
-            self.inversion_count = 0  # healthy — reset the persistence counter
+            self.consecutive_inversions = 0  # healthy reset
+
+    def on_log(self, state, control, logs=None) -> bool:
+        """Convenience: extract rewards from a log dict, observe, and flag the
+        trainer to stop. Returns True when the run must halt."""
+        if not logs:
+            return False
+        chosen = _first_present(logs, _CHOSEN_KEYS)
+        rejected = _first_present(logs, _REJECTED_KEYS)
+        self.observe(chosen, rejected, getattr(state, "global_step", 0))
+        if self.aborted:
+            control.should_training_stop = True
+            return True
         return False
 
+    # -- reporting ----------------------------------------------------------
 
-def _first_present(logs: dict, keys) -> float | None:
+    def final_metrics(self) -> Optional[dict]:
+        """Summary for the evidence bundle. None if no rewards were ever logged."""
+        if not self.margins:
+            return None
+        final = self.margins[-1]
+        margins = [m["margin"] for m in self.margins]
+        return {
+            "training_method": "dpo",
+            "final_chosen_reward": final["chosen"],
+            "final_rejected_reward": final["rejected"],
+            "final_reward_margin": final["margin"],
+            "max_reward_margin": max(margins),
+            "min_reward_margin": min(margins),
+            "num_logged_steps": len(self.margins),
+            "reward_inversion_detected": self.aborted,
+        }
+
+
+def _first_present(logs: dict, keys) -> Optional[float]:
     for k in keys:
         v = logs.get(k)
         if v is not None:
@@ -92,6 +117,16 @@ def _first_present(logs: dict, keys) -> float | None:
             except (TypeError, ValueError):
                 return None
     return None
+
+
+def _persist_metrics(core: RewardInversionCore, run_dir: Path) -> None:
+    """Write ``dpo_metrics.json`` if any rewards were logged. Always safe to
+    call — on success AND on a guard halt (auditable trail)."""
+    metrics = core.final_metrics()
+    if metrics:
+        (run_dir / "dpo_metrics.json").write_text(
+            json.dumps(metrics, indent=2), encoding="utf-8"
+        )
 
 
 def run_dpo(
@@ -111,6 +146,7 @@ def run_dpo(
     """Execute guarded DPO training.
 
     Returns True on success, or False if halted by a fail-closed guard.
+    ``dpo_metrics.json`` is persisted in either case.
     """
     ensure_train_deps()
     # --- 1. Lazy imports ---
@@ -131,13 +167,31 @@ def run_dpo(
     log_file = run_dir / "train_log.jsonl"
     fail_state_file = run_dir / "fail_state.json"
 
-    # --- 3. The Reward Inversion Guard (logic in RewardInversionCore) ---
+    # --- 3. The Reward Inversion Guard ---
     class RewardInversionGuard(TrainerCallback, RewardInversionCore):
-        def __init__(self, log_path: Path, fail_path: Path, threshold: int):
-            RewardInversionCore.__init__(self, log_path, fail_path, threshold)
+        def __init__(self, threshold: int, log_path: Path, fail_path: Path):
+            RewardInversionCore.__init__(self, inversion_threshold=threshold)
+            self.log_path = log_path
+            self.fail_path = fail_path
 
         def on_log(self, args, state, control, logs=None, **kwargs):
-            return RewardInversionCore.on_log(self, state, control, logs)
+            if not logs:
+                return False
+            with open(self.log_path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"step": state.global_step, **logs}) + "\n")
+
+            halted = RewardInversionCore.on_log(self, state, control, logs)
+            if halted and not self.fail_path.exists():
+                last = self.margins[-1]
+                with open(self.fail_path, "w", encoding="utf-8") as fh:
+                    json.dump({
+                        "reason": self.reason,
+                        "chosen_reward": last["chosen"],
+                        "rejected_reward": last["rejected"],
+                        "step": last["step"],
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }, fh)
+            return halted
 
     # --- 4. Load model & tokenizer ---
     log.info("[tinct] Loading model and tokenizer: %s", model_name_or_path)
@@ -184,7 +238,7 @@ def run_dpo(
     )
 
     # --- 7. Initialize trainer with guard ---
-    guard = RewardInversionGuard(log_file, fail_state_file, inversion_threshold)
+    guard = RewardInversionGuard(inversion_threshold, log_file, fail_state_file)
     trainer = DPOTrainer(
         model=model,
         ref_model=None,
@@ -208,6 +262,10 @@ def run_dpo(
                 with open(fail_state_file, "w", encoding="utf-8") as fh:
                     json.dump({"reason": "exception", "error": str(exc)}, fh)
         return False
+    finally:
+        # Always persist the reward trajectory — even an aborted run leaves an
+        # auditable trail (reward_inversion_detected=true records WHY it failed).
+        _persist_metrics(guard, run_dir)
 
     if guard.aborted:
         log.error("[tinct] Run ABORTED due to Reward Inversion (DO NOT SHIP).")

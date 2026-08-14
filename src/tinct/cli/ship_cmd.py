@@ -48,7 +48,28 @@ def run_ship(project: Project, run_name: str | None) -> int:
         console.print("[tinct] Reason: Generation smoke test failed.\n")
         return 2
 
-    # 3. Hash the adapter — prove exactly which weights are shipping.
+    # 3. DPO certification gate (only for DPO runs, which persist
+    #    dpo_metrics.json). Answers "did alignment happen?" — not just
+    #    "does it run?".
+    training_method = "sft"
+    dpo_metrics = None
+    dpo_metrics_path = run_dir / "dpo_metrics.json"
+    if dpo_metrics_path.is_file():
+        dpo_metrics = json.loads(dpo_metrics_path.read_text(encoding="utf-8"))
+        training_method = "dpo"
+        # DPO gate 1: no reward inversion may ship (backstop for the guard).
+        if dpo_metrics.get("reward_inversion_detected"):
+            print_decision(console, "DON'T_SHIP")
+            console.print("[tinct] Reason: reward inversion detected during training.\n")
+            return 2
+        # DPO gate 2: final alignment must be positive (chosen > rejected).
+        if dpo_metrics.get("final_reward_margin", 0) <= 0:
+            print_decision(console, "DON'T_SHIP")
+            console.print("[tinct] Reason: non-positive reward margin "
+                          "(model does not prefer chosen).\n")
+            return 2
+
+    # 4. Hash the adapter — prove exactly which weights are shipping.
     adapter_dir = run_dir / "adapter"
     if not adapter_dir.is_dir():
         console.print("[red]Error: no adapter directory in the run.[/]")
@@ -67,6 +88,8 @@ def run_ship(project: Project, run_name: str | None) -> int:
     metrics_path = run_dir / "metrics.json"
     if metrics_path.is_file():
         artifacts["metrics.json"] = hash_path(metrics_path)
+    if dpo_metrics_path.is_file():
+        artifacts["dpo_metrics.json"] = hash_path(dpo_metrics_path)
     chunk_manifest = run_dir / "base_model_chunks.json"
     if chunk_manifest.is_file():
         artifacts["base_model_chunks.json"] = hash_path(chunk_manifest)
@@ -79,7 +102,7 @@ def run_ship(project: Project, run_name: str | None) -> int:
         artifacts=artifacts,
         data_report=data_report,
         eval_report=eval_data,
-        metrics={"n_runs": 1},
+        metrics={"training_method": training_method, "dpo_metrics": dpo_metrics},
         config=project.config.model_dump(mode="json"),
     )
 

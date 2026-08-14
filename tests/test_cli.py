@@ -54,7 +54,8 @@ def test_security_check_on_fresh_project(tmp_path: Path):
 
 
 def _seed_run(proj: Path, name: str, final_eval_loss: float,
-              eval_status: str | None = None, fail_state: bool = False):
+              eval_status: str | None = None, fail_state: bool = False,
+              dpo_metrics: dict | None = None):
     run = proj / ".tinct" / "runs" / name
     (run / "adapter").mkdir(parents=True)
     (run / "adapter" / "adapter_model.safetensors").write_text("x")
@@ -69,6 +70,8 @@ def _seed_run(proj: Path, name: str, final_eval_loss: float,
             _j.dumps({"gate": "generation_smoke_test", "status": eval_status,
                       "empty_responses": 0, "repetitive_responses": 0, "details": []})
         )
+    if dpo_metrics is not None:
+        (run / "dpo_metrics.json").write_text(_j.dumps(dpo_metrics))
     if fail_state:
         (run / "fail_state.json").write_text(
             _j.dumps({"reason": "loss_explosion", "value": "10.38"})
@@ -128,4 +131,60 @@ def test_security_check_run_missing_evidence(tmp_path: Path):
     runner.invoke(app, ["init", "proj", "meta-llama/Llama-3.1-8B", "--root", str(tmp_path)])
     result = runner.invoke(app, ["security", "check", "--run", "nope", "--root", str(proj)])
     assert result.exit_code == 1
+
+
+# -- DPO certification gates -------------------------------------------------
+
+_HEALTHY_DPO = {
+    "training_method": "dpo",
+    "final_chosen_reward": 1.2, "final_rejected_reward": 0.3,
+    "final_reward_margin": 0.9, "max_reward_margin": 0.9,
+    "min_reward_margin": 0.5, "num_logged_steps": 3,
+    "reward_inversion_detected": False,
+}
+
+
+def test_ship_blocks_inverted_dpo_run(tmp_path: Path):
+    proj = tmp_path / "proj"
+    runner.invoke(app, ["init", "proj", "meta-llama/Llama-3.1-8B", "--root", str(tmp_path)])
+    dpo = dict(_HEALTHY_DPO, reward_inversion_detected=True, final_reward_margin=-0.8)
+    _seed_run(proj, "run_1", 1.2, eval_status="PASS", dpo_metrics=dpo)
+    result = runner.invoke(app, ["ship", "--run", "run_1", "--root", str(proj)])
+    assert result.exit_code == 2
+    assert "reward inversion" in result.output
+
+
+def test_ship_blocks_negative_margin(tmp_path: Path):
+    proj = tmp_path / "proj"
+    runner.invoke(app, ["init", "proj", "meta-llama/Llama-3.1-8B", "--root", str(tmp_path)])
+    dpo = dict(_HEALTHY_DPO, final_reward_margin=-0.1)
+    _seed_run(proj, "run_1", 1.2, eval_status="PASS", dpo_metrics=dpo)
+    result = runner.invoke(app, ["ship", "--run", "run_1", "--root", str(proj)])
+    assert result.exit_code == 2
+    assert "non-positive reward margin" in result.output
+
+
+def test_ship_includes_dpo_metrics_in_evidence(tmp_path: Path):
+    proj = tmp_path / "proj"
+    runner.invoke(app, ["init", "proj", "meta-llama/Llama-3.1-8B", "--root", str(tmp_path)])
+    _seed_run(proj, "run_1", 1.2, eval_status="PASS", dpo_metrics=_HEALTHY_DPO)
+    result = runner.invoke(app, ["ship", "--run", "run_1", "--root", str(proj)])
+    assert result.exit_code == 0, result.output
+    import json as _j
+    ev = _j.loads((proj / ".tinct" / "evidence" / "run_1_evidence.json").read_text())
+    assert ev["metrics"]["training_method"] == "dpo"
+    assert ev["metrics"]["dpo_metrics"]["final_reward_margin"] == 0.9
+    assert "dpo_metrics.json" in ev["artifacts"]
+
+
+def test_ship_sft_unchanged_without_dpo_metrics(tmp_path: Path):
+    proj = tmp_path / "proj"
+    runner.invoke(app, ["init", "proj", "meta-llama/Llama-3.1-8B", "--root", str(tmp_path)])
+    _seed_run(proj, "run_1", 1.2, eval_status="PASS")  # no dpo_metrics.json
+    result = runner.invoke(app, ["ship", "--run", "run_1", "--root", str(proj)])
+    assert result.exit_code == 0, result.output
+    import json as _j
+    ev = _j.loads((proj / ".tinct" / "evidence" / "run_1_evidence.json").read_text())
+    assert ev["metrics"]["training_method"] == "sft"
+    assert ev["metrics"]["dpo_metrics"] is None
 
