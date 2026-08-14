@@ -128,6 +128,12 @@ HF_TOKEN=hf_... bash scripts/pod_bootstrap.sh meta-llama/Llama-3.2-1B 10.0
 GPU + token, and runs the full verification — a real SHIP in ~15 minutes,
 typically well under a dollar of pod time on 3.2-1B.
 
+Verify a run's evidence structure and signature after the fact:
+
+```bash
+python scripts/verify_evidence.py <run_id>   # exit 0 = signed SHIP, all artifacts hashed
+```
+
 There is also a `.github/workflows/gpu-verify.yml` (workflow_dispatch) that
 runs the same script on a self-hosted GPU runner (label `gpu`, `HF_TOKEN`
 secret) — see the workflow comments to enable it.
