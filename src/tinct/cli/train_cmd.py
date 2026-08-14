@@ -73,6 +73,51 @@ def prepare_base_model_chunks(
     return model_path
 
 
+def _run_dpo_training(project: Project, doctor: DataDoctor, records, dataset: Path,
+                      run_name: str | None) -> int:
+    """DPO training: preference dataset (prompt/chosen/rejected) + the Reward
+    Inversion Guard. Returns 0 on success, 2 on a fail-closed halt."""
+    console = get_console()
+    train_cfg = project.config.train
+
+    if doctor.format_used != "dpo":
+        console.print("[bold red]Method 'dpo' requires a preference dataset "
+                      "with prompt/chosen/rejected fields.[/]")
+        return 1
+
+    try:
+        ensure_train_deps()
+    except MissingDependencyError as exc:
+        console.print(f"[bold red]Cannot train:[/] {escape(str(exc))}")
+        return 3
+
+    name = run_name or _default_run_name()
+    run_dir = project.create_run(name)
+    # Preserve the exact training data in the run for the evidence bundle.
+    dataset_out = run_dir / "train.jsonl"
+    dataset_out.write_bytes(Path(dataset).read_bytes())
+    console.print(f"[green]Run {name!r} created at[/] {run_dir}")
+
+    from tinct.trainers.dpo_trainer import run_dpo
+    ok_run = run_dpo(
+        model_name_or_path=train_cfg.model,
+        dataset_path=dataset_out,
+        run_dir=run_dir,
+        lora_rank=train_cfg.lora_r,
+    )
+    _materialize_metrics(run_dir)
+
+    if not ok_run:
+        console.print("\n[tinct] VERDICT: DON'T SHIP (DPO halted by fail-closed guard).")
+        console.print(f"  inspect: {run_dir / 'fail_state.json'} (if present)")
+        return 2
+
+    console.print("\n[tinct] SUCCESS. Artifacts saved to:")
+    console.print(f"  adapter: {run_dir / 'adapter'}")
+    console.print("Run `tinct eval` and `tinct ship` to certify this run.\n")
+    return 0
+
+
 def run_train(project: Project, dataset: Path, run_name: str | None,
               model_override: str | None, method: str = "sft",
               lora_rank_override: int | None = None,
@@ -80,9 +125,10 @@ def run_train(project: Project, dataset: Path, run_name: str | None,
     """Validate, split, train. Returns 0 on success, non-zero otherwise."""
     console = get_console()
 
-    # Fail-closed 0: training method must be supported in V0.
-    if method.lower() != "sft":
-        console.print(f"[bold red]Method {method!r} is not supported in V0. Only 'sft'.[/]")
+    # Fail-closed 0: training method must be supported.
+    method = method.lower()
+    if method not in ("sft", "dpo"):
+        console.print(f"[bold red]Method {method!r} is not supported. Use 'sft' or 'dpo'.[/]")
         return 1
 
     # Fail-closed 1: unsupported model family (security gate).
@@ -112,6 +158,9 @@ def run_train(project: Project, dataset: Path, run_name: str | None,
     if not report.passed:
         console.print("[bold red]Training blocked: data validation failed (fail-closed).[/]")
         return 1
+
+    if method == "dpo":
+        return _run_dpo_training(project, doctor, records, dataset, run_name)
 
     train_records, valid_records = doctor.split(records)
     console.print(f"[bold]Split:[/] {len(train_records)} train / {len(valid_records)} valid")

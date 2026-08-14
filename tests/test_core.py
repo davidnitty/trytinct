@@ -6,7 +6,12 @@ from pathlib import Path
 import pytest
 
 from tinct.core.config import ProjectConfig, load_config
-from tinct.core.datadoctor import DataDoctor, DatasetLoadError
+from tinct.core.datadoctor import (
+    DataDoctor,
+    DatasetLoadError,
+    check_dataset_format,
+    validate_dpo_row,
+)
 from tinct.core.project import Project, UnsupportedModelFamily, detect_model_family
 
 
@@ -115,3 +120,59 @@ def test_text_format_dataset_auto_detected(project, tmp_path: Path):
     assert report.passed
     assert doctor.format_used == "text"
     assert len(records) == 22
+
+
+# -- DPO data ---------------------------------------------------------------
+
+def test_check_dataset_format_detects_dpo_and_sft():
+    assert check_dataset_format({"prompt": "p", "chosen": "a", "rejected": "b"}) == "dpo"
+    assert check_dataset_format({"text": "hello"}) == "sft"
+    assert check_dataset_format({"instruction": "q", "output": "a"}) == "unknown"
+
+
+def test_validate_dpo_row_ok():
+    row = {"prompt": "p", "chosen": "good answer", "rejected": "bad answer"}
+    assert validate_dpo_row(row, 0) == []
+
+
+def test_validate_dpo_row_missing_keys():
+    errors = validate_dpo_row({"prompt": "p", "chosen": "a"}, 3)
+    assert len(errors) == 1
+    assert "Row 3" in errors[0]
+    assert "Missing keys" in errors[0]
+
+
+def test_validate_dpo_row_empty_or_non_string():
+    errors = validate_dpo_row({"prompt": "p", "chosen": "", "rejected": "b"}, 1)
+    assert any("chosen" in e and "empty" in e for e in errors)
+    errors2 = validate_dpo_row({"prompt": "p", "chosen": 42, "rejected": "b"}, 1)
+    assert any("chosen" in e and "not a string" in e for e in errors2)
+
+
+def test_validate_dpo_row_chosen_equals_rejected():
+    errors = validate_dpo_row({"prompt": "p", "chosen": "same", "rejected": "same"}, 0)
+    assert any("identical" in e for e in errors)
+
+
+def test_dpo_dataset_passes_doctor(project, tmp_path: Path):
+    data = tmp_path / "dpo.jsonl"
+    rows = [{"prompt": f"Question {i}?", "chosen": f"Good answer {i}",
+             "rejected": f"Bad answer {i}"} for i in range(20)]
+    data.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+
+    doctor = DataDoctor(project.config.data, max_seq_len=2048, seed=42)
+    report, records = doctor.run(data)
+    assert report.passed
+    assert doctor.format_used == "dpo"
+    assert len(records) == 20
+
+
+def test_dpo_dataset_with_identical_pairs_fails(project, tmp_path: Path):
+    data = tmp_path / "dpo.jsonl"
+    rows = [{"prompt": f"Q{i}", "chosen": "same", "rejected": "same"} for i in range(20)]
+    data.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+
+    doctor = DataDoctor(project.config.data, max_seq_len=2048, seed=42)
+    report, _ = doctor.run(data)
+    assert not report.passed
+    assert any(r.rule_id == "data.dpo.distinct" for r in report.failed_errors)

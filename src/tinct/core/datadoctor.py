@@ -25,6 +25,44 @@ class DatasetLoadError(ValueError):
 
 APPROX_CHARS_PER_TOKEN = 4
 
+DPO_KEYS = ("prompt", "chosen", "rejected")
+
+
+def check_dataset_format(sample_row: dict) -> str:
+    """Detect whether a dataset is SFT or DPO from its schema.
+
+    Returns ``"dpo"``, ``"sft"``, or ``"unknown"``.
+    """
+    if all(k in sample_row for k in DPO_KEYS):
+        return "dpo"
+    if "text" in sample_row:
+        return "sft"
+    return "unknown"
+
+
+def validate_dpo_row(row: dict, row_idx: int) -> list[str]:
+    """Validate a single row of DPO preference data.
+
+    Returns a list of human-readable error strings (empty if valid).
+    """
+    errors: list[str] = []
+    if not all(k in row for k in DPO_KEYS):
+        errors.append(
+            f"Row {row_idx}: Missing keys. Expected {set(DPO_KEYS)}, "
+            f"got {set(row.keys())}"
+        )
+        return errors
+    for key in DPO_KEYS:
+        if not isinstance(row[key], str) or not row[key].strip():
+            errors.append(f"Row {row_idx}: Field '{key}' is empty or not a string.")
+    # Critical safety check: chosen and rejected must differ (DPO math breaks).
+    if row.get("chosen") == row.get("rejected"):
+        errors.append(
+            f"Row {row_idx}: 'chosen' and 'rejected' are identical. "
+            "This breaks DPO math."
+        )
+    return errors
+
 
 class DataDoctor:
     """Stateless validator. Each :meth:`run` produces a fresh report."""
@@ -66,10 +104,13 @@ class DataDoctor:
     # -- rules --------------------------------------------------------------
 
     def _detect_format(self, records: List[Dict[str, Any]]) -> None:
-        """Decide the effective schema: explicit ``text`` format, or auto-detect
-        a ``text``-only dataset (already chat-formatted) vs column-based."""
+        """Decide the effective schema: explicit, or auto-detect DPO vs SFT."""
         cfg = self.config
         first = records[0]
+        sample = check_dataset_format(first)
+        if sample == "dpo":
+            self.format_used = "dpo"
+            return
         if cfg.format == "text" or (
             cfg.format in ("instruct", "alpaca", "chatml")
             and "text" in first
@@ -113,16 +154,47 @@ class DataDoctor:
                        f"{len(records)} rows is below the fail-closed minimum {self.config.min_rows}")
         )
 
-        self._check_columns(report, records)
-        self._check_empty_fields(report, records)
-        self._check_duplicates(report, records)
-        self._check_lengths(report, records)
-        self._check_token_estimate(report, records)
-        self._check_output_diversity(report, records)
+        if self.format_used == "dpo":
+            self._check_dpo(report, records)
+        else:
+            self._check_columns(report, records)
+            self._check_empty_fields(report, records)
+            self._check_duplicates(report, records)
+            self._check_lengths(report, records)
+            self._check_token_estimate(report, records)
+            self._check_output_diversity(report, records)
 
         return report, records
 
     # -- individual checks --------------------------------------------------
+
+    def _check_dpo(self, report: RuleReport, records: List[Dict[str, Any]]) -> None:
+        """Fail-closed DPO structure validation (prompt/chosen/rejected)."""
+        missing = empty = identical = 0
+        total = len(records)
+        for i, row in enumerate(records):
+            for err in validate_dpo_row(row, i):
+                if "Missing keys" in err:
+                    missing += 1
+                elif "empty or not a string" in err:
+                    empty += 1
+                elif "identical" in err:
+                    identical += 1
+        if missing:
+            report.add(error(
+                "data.dpo.missing_keys", "DPO keys present",
+                f"{missing}/{total} rows are missing prompt/chosen/rejected."))
+        if empty:
+            report.add(error(
+                "data.dpo.empty_fields", "DPO fields populated",
+                f"{empty}/{total} rows have empty or non-string fields."))
+        if identical:
+            report.add(error(
+                "data.dpo.distinct", "chosen differs from rejected",
+                f"{identical}/{total} rows have chosen == rejected (breaks DPO math)."))
+        if not (missing or empty or identical):
+            report.add(ok("data.dpo.structure", "DPO preference structure",
+                          "Rows well-formed: prompt/chosen/rejected, non-empty, distinct."))
 
     def _check_columns(self, report: RuleReport, records: List[Dict[str, Any]]) -> None:
         if self.format_used == "text":

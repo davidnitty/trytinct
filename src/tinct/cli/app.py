@@ -104,7 +104,7 @@ def train(
     root: Path = typer.Option(".", "--root", help="Project root."),
     run: str | None = typer.Option(None, "--run", help="Run name (defaults to timestamp)."),
     model: str | None = typer.Option(None, "--model", help="Override the configured base model."),
-    method: str = typer.Option("sft", "--method", help="Training method (only 'sft' in V0)."),
+    method: str = typer.Option("sft", "--method", help="Training method: 'sft' or 'dpo' (V0.2)."),
     lora_rank: int | None = typer.Option(None, "--lora-rank", help="Override the LoRA rank."),
     max_loss_threshold: float | None = typer.Option(
         None, "--max-loss-threshold", help="Override the fail-closed loss threshold."

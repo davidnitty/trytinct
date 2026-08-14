@@ -50,7 +50,7 @@ tinct security check --run latest               # verify the signature
 | `tinct init <name> <model>` | Scaffold a project + Ed25519 signing key. |
 | `tinct validate <dataset>` | Data Doctor: schema, empties, duplicates, lengths. |
 | `tinct advise <dataset>` | Recommend a post-training method. |
-| `tinct train` | LoRA/QLoRA SFT with the fail-closed loss guard. |
+| `tinct train` | SFT (loss guard) or `--method dpo` (reward-inversion guard). |
 | `tinct eval` | Generation smoke test → `eval_report.json`. |
 | `tinct ship` | Certification: gate checks + adapter hash + signed evidence. |
 | `tinct security check` | Audit secrets, key perms, evidence signatures. |
@@ -146,6 +146,8 @@ secret) — see the workflow comments to enable it.
 ## Roadmap
 
 - **V0 (current):** Llama LoRA/QLoRA end-to-end with signed ship evidence.
+- **V0.2:** DPO with the **Reward Inversion Guard** (`tinct train --method dpo`
+  on `prompt/chosen/rejected` data — `examples/dpo_data.jsonl`).
 - **V2:** Qwen optimizations (Unsloth, GRPO).
 - **V3:** DeepSeek MoE/reasoning.
 

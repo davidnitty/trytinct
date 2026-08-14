@@ -1,0 +1,20 @@
+{"prompt": "What is 2+2?", "chosen": "2+2 is 4.", "rejected": "2+2 is 5."}
+{"prompt": "What is the capital of France?", "chosen": "Paris.", "rejected": "London."}
+{"prompt": "How many days in a week?", "chosen": "Seven.", "rejected": "Ten."}
+{"prompt": "What do bees produce?", "chosen": "Honey.", "rejected": "Spiders."}
+{"prompt": "Who wrote Hamlet?", "chosen": "Shakespeare.", "rejected": "Einstein."}
+{"prompt": "What is the sky color at noon?", "chosen": "Blue.", "rejected": "Purple."}
+{"prompt": "How many sides does a triangle have?", "chosen": "Three.", "rejected": "Two."}
+{"prompt": "What is the smallest prime number?", "chosen": "2.", "rejected": "1."}
+{"prompt": "What gas do plants absorb?", "chosen": "Carbon dioxide.", "rejected": "Oxygen only."}
+{"prompt": "What is the largest ocean?", "chosen": "Pacific.", "rejected": "Arctic."}
+{"prompt": "What does RAM stand for?", "chosen": "Random Access Memory.", "rejected": "Rapid Action Machine."}
+{"prompt": "What is the currency of Japan?", "chosen": "Yen.", "rejected": "Dollar."}
+{"prompt": "Who painted the Mona Lisa?", "chosen": "Leonardo da Vinci.", "rejected": "Picasso."}
+{"prompt": "What is the boiling point of water?", "chosen": "100 C at sea level.", "rejected": "50 C."}
+{"prompt": "What is gravity?", "chosen": "A force that pulls objects together.", "rejected": "A type of juice."}
+{"prompt": "What planet do we live on?", "chosen": "Earth.", "rejected": "Mars."}
+{"prompt": "What do plants produce during photosynthesis?", "chosen": "Oxygen and glucose.", "rejected": "Carbon dioxide."}
+{"prompt": "What is a synonym for happy?", "chosen": "Joyful.", "rejected": "Angry."}
+{"prompt": "What is the fastest land animal?", "chosen": "Cheetah.", "rejected": "Tortoise."}
+{"prompt": "What is a baby cat called?", "chosen": "Kitten.", "rejected": "Puppy."}
