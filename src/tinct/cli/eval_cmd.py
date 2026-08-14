@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from rich.markup import escape
+
 from tinct.cli.render import print_report
 from tinct.engine.deps import MissingDependencyError
 from tinct.evals.gate import EvalGate
@@ -70,7 +72,7 @@ def run_eval(project, run_name: str | None) -> int:
             eval_report_path,
         )
     except MissingDependencyError as exc:
-        console.print(f"[bold red]Cannot evaluate:[/] {str(exc).replace('[', '\\\\[')}")
+        console.print(f"[bold red]Cannot evaluate:[/] {escape(str(exc))}")
         return 3
 
     console.print(f"\n  run: {run_dir.name}")

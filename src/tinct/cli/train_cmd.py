@@ -6,6 +6,8 @@ import datetime as _dt
 import json
 from pathlib import Path
 
+from rich.markup import escape
+
 from tinct.cli.render import print_report
 from tinct.core.datadoctor import DataDoctor, DatasetLoadError
 from tinct.core.project import Project
@@ -19,11 +21,6 @@ from tinct.utils.logging import get_console
 
 def _default_run_name() -> str:
     return _dt.datetime.now(_dt.timezone.utc).strftime("run_%Y%m%d_%H%M%S")
-
-
-def _escape(text: str) -> str:
-    """Escape rich markup so optional-extra brackets like ``[train]`` show up."""
-    return text.replace("[", "\\[")
 
 
 def _write_jsonl(records, path: Path) -> None:
@@ -124,7 +121,7 @@ def run_train(project: Project, dataset: Path, run_name: str | None,
     try:
         ensure_train_deps(quant=train_cfg.quant)
     except MissingDependencyError as exc:
-        console.print(f"[bold red]Cannot train:[/] {_escape(str(exc))}")
+        console.print(f"[bold red]Cannot train:[/] {escape(str(exc))}")
         return 3
 
     name = run_name or _default_run_name()
