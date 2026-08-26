@@ -23,6 +23,7 @@ import math
 from datetime import datetime, timezone
 from pathlib import Path
 
+from tinct.safety.canaries import canary_text, generate_canaries, save_canaries
 from tinct.utils.logging import get_logger
 
 log = get_logger("tinct.trainers.sft")
@@ -103,7 +104,7 @@ def run_sft(
         import torch
         from transformers import TrainerCallback
         from trl import SFTConfig, SFTTrainer
-        from datasets import load_dataset
+        from datasets import Dataset, concatenate_datasets, load_dataset
     except ImportError as exc:
         raise ImportError(
             "Training dependencies missing.\n"
@@ -118,6 +119,11 @@ def run_sft(
 
     log_file = run_dir / "train_log.jsonl"
     fail_state_file = run_dir / "fail_state.json"
+
+    # Canary injection (Behavioral Certification Gate 1): track unique canary
+    # phrases so `tinct eval --safety` can later detect memorization leakage.
+    canaries = generate_canaries(num_canaries=10)
+    save_canaries(run_dir, canaries)
 
     # --- 3. Fail-closed callback (logic lives in FailClosedCore, which is
     # tested directly without any ML dependency) ---
@@ -150,6 +156,10 @@ def run_sft(
     # --- 5. Load dataset ---
     log.info("[tinct] Loading dataset: %s", dataset_path)
     dataset = load_dataset("json", data_files=str(dataset_path), split="train")
+
+    # Append the canary examples to the training set.
+    canary_dataset = Dataset.from_list([{"text": canary_text(c)} for c in canaries])
+    dataset = concatenate_datasets([dataset, canary_dataset])
 
     # --- 6. Training arguments ---
     sft_config = SFTConfig(

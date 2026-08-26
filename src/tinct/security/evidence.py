@@ -81,6 +81,7 @@ class EvidenceReport:
     eval_report: Dict[str, Any] = field(default_factory=dict)
     metrics: Dict[str, Any] = field(default_factory=dict)
     config: Dict[str, Any] = field(default_factory=dict)
+    safety_gates: Dict[str, Any] = field(default_factory=dict)
     signature: Optional[Dict[str, Any]] = None
 
     # -- signing ------------------------------------------------------------
@@ -98,6 +99,7 @@ class EvidenceReport:
             "eval_report": self.eval_report,
             "metrics": self.metrics,
             "config": self.config,
+            "safety_gates": self.safety_gates,
         }
         return json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
@@ -133,6 +135,7 @@ class EvidenceReport:
             "eval_report": self.eval_report,
             "metrics": self.metrics,
             "config": self.config,
+            "safety_gates": self.safety_gates,
             "signature": self.signature,
         }
 
@@ -149,6 +152,7 @@ class EvidenceReport:
             eval_report=raw.get("eval_report", {}),
             metrics=raw.get("metrics", {}),
             config=raw.get("config", {}),
+            safety_gates=raw.get("safety_gates", {}),
             signature=raw.get("signature"),
         )
 

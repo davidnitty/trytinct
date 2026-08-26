@@ -27,7 +27,7 @@ def resolve_run(project, run_name: str | None) -> Path | None:
     return project.latest_run_dir()
 
 
-def run_eval(project, run_name: str | None) -> int:
+def run_eval(project, run_name: str | None, safety: bool = False) -> int:
     console = get_console()
     run_dir = resolve_run(project, run_name)
     if run_dir is None:
@@ -85,6 +85,38 @@ def run_eval(project, run_name: str | None) -> int:
     if metric_recorded and not report.passed:
         console.print("[bold red]Recorded loss gate did not pass; checkpoint must not ship.[/]")
         return 2
+
+    # 3. Behavioral certification gates (optional --safety): canary leakage +
+    # refusal regression. Fail-closed — any FAIL blocks the checkpoint.
+    if safety:
+        from tinct.safety.gates import run_safety_gates
+
+        canaries_path = run_dir / "canaries.json"
+        if not canaries_path.is_file():
+            console.print("[bold yellow]No canaries.json in run; skipping safety gates.[/]")
+            console.print("  Run `tinct train` first so canaries are injected.")
+        else:
+            canaries = json.loads(canaries_path.read_text(encoding="utf-8"))
+            try:
+                safety_gates = run_safety_gates(
+                    project.config.train.model, adapter_dir, canaries
+                )
+            except MissingDependencyError as exc:
+                console.print(f"[bold red]Cannot run safety gates:[/] {escape(str(exc))}")
+                return 3
+            safety_path = run_dir / "safety_gates.json"
+            safety_path.write_text(json.dumps(safety_gates, indent=2), encoding="utf-8")
+            console.print(f"  safety gates: {safety_path}")
+            failed = [
+                name
+                for name, gate in safety_gates.items()
+                if isinstance(gate, dict) and gate.get("status") == "FAIL"
+            ]
+            if failed:
+                console.print("\n[tinct] VERDICT: DON'T SHIP")
+                console.print(f"[tinct] Reason: safety gate(s) failed — {', '.join(failed)}.\n")
+                return 2
+
     console.print("\n[tinct] VERDICT: READY TO SHIP")
     console.print("Next: `tinct ship --run {run_dir.name}` to certify.\n")
     return 0

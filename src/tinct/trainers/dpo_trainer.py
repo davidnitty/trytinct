@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Optional
 
 from tinct.engine.deps import ensure_train_deps
+from tinct.safety.canaries import generate_canaries, save_canaries
 from tinct.utils.logging import get_logger
 
 log = get_logger("tinct.trainers.dpo")
@@ -170,6 +171,11 @@ def run_dpo(
     run_dir.mkdir(parents=True, exist_ok=True)
     log_file = run_dir / "train_log.jsonl"
     fail_state_file = run_dir / "fail_state.json"
+
+    # Track canaries so `tinct eval --safety` runs the leakage gate uniformly.
+    # (DPO trains preference pairs, so we don't inject canary text into its
+    # dataset — canary memorization is an SFT-phase concern.)
+    save_canaries(run_dir, generate_canaries(num_canaries=10))
 
     # --- 3. The Reward Inversion Guard ---
     class RewardInversionGuard(TrainerCallback, RewardInversionCore):

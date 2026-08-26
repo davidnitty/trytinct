@@ -69,6 +69,22 @@ def run_ship(project: Project, run_name: str | None) -> int:
                           "(model does not prefer chosen).\n")
             return 2
 
+    # 3b. Behavioral certification gates (if `tinct eval --safety` ran): any
+    # FAIL gate blocks shipping — this is what makes tinct a compliance tool.
+    safety_gates = {}
+    safety_gates_path = run_dir / "safety_gates.json"
+    if safety_gates_path.is_file():
+        safety_gates = json.loads(safety_gates_path.read_text(encoding="utf-8"))
+        failed = [
+            name
+            for name, gate in safety_gates.items()
+            if isinstance(gate, dict) and gate.get("status") == "FAIL"
+        ]
+        if failed:
+            print_decision(console, "DON'T_SHIP")
+            console.print(f"[tinct] Reason: safety gate(s) failed — {', '.join(failed)}.\n")
+            return 2
+
     # 4. Hash the adapter — prove exactly which weights are shipping.
     adapter_dir = run_dir / "adapter"
     if not adapter_dir.is_dir():
@@ -90,6 +106,8 @@ def run_ship(project: Project, run_name: str | None) -> int:
         artifacts["metrics.json"] = hash_path(metrics_path)
     if dpo_metrics_path.is_file():
         artifacts["dpo_metrics.json"] = hash_path(dpo_metrics_path)
+    if safety_gates_path.is_file():
+        artifacts["safety_gates.json"] = hash_path(safety_gates_path)
     chunk_manifest = run_dir / "base_model_chunks.json"
     if chunk_manifest.is_file():
         artifacts["base_model_chunks.json"] = hash_path(chunk_manifest)
@@ -104,6 +122,7 @@ def run_ship(project: Project, run_name: str | None) -> int:
         eval_report=eval_data,
         metrics={"training_method": training_method, "dpo_metrics": dpo_metrics},
         config=project.config.model_dump(mode="json"),
+        safety_gates=safety_gates,
     )
 
     # Cryptographic evidence is required to ship (secure by default).

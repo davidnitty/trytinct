@@ -133,10 +133,13 @@ def train(
 def evaluate(
     root: Path = typer.Option(".", "--root", help="Project root."),
     run: str | None = typer.Option(None, "--run", help="Run name (defaults to latest)."),
+    safety: bool = typer.Option(
+        False, "--safety", help="Run behavioral certification gates (canary leakage + refusal regression)."
+    ),
 ) -> None:
     """Gate a trained checkpoint against thresholds."""
     project = _open_project(root)
-    _exit(eval_cmd.run_eval(project, run))
+    _exit(eval_cmd.run_eval(project, run, safety=safety))
 
 
 @app.command("ship")
