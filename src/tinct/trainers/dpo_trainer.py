@@ -220,10 +220,13 @@ def run_dpo(
     dataset = load_dataset("json", data_files=str(dataset_path), split="train")
 
     # --- 6. Configure DPO ---
+    # Unsloth is more memory-efficient, so DPO can afford a slightly larger
+    # batch when it is the active accelerator (ref_model=None already means the
+    # base model is used as the reference, which Unsloth handles natively).
     dpo_config = DPOConfig(
         output_dir=str(run_dir / "checkpoints"),
         beta=beta,
-        per_device_train_batch_size=per_device_batch_size,
+        per_device_train_batch_size=2 if accelerator == "unsloth" else per_device_batch_size,
         gradient_accumulation_steps=grad_accum_steps,
         learning_rate=learning_rate,
         logging_steps=logging_steps,

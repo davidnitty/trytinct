@@ -152,9 +152,6 @@ def run_train(project: Project, dataset: Path, run_name: str | None,
     if accelerator not in ("none", "unsloth"):
         console.print(f"[bold red]Accelerator {accelerator!r} is not supported. Use 'none' or 'unsloth'.[/]")
         return 1
-    if method == "dpo" and accelerator == "unsloth":
-        console.print("[yellow]Unsloth is not yet wired into DPO; falling back to 'none'.[/]")
-        accelerator = "none"
 
     # Fail-closed 0c: verify unsloth is importable BEFORE doing any expensive
     # work (model download/chunking). Fails fast with an actionable hint.

@@ -26,6 +26,19 @@ def test_train_unsloth_fails_fast_without_dep(tmp_path: Path):
     assert "tinct[unsloth]" in result.output
 
 
+def test_train_dpo_unsloth_fails_fast_without_dep(tmp_path: Path):
+    """DPO + unsloth routes to the accelerator guard (exit 3), not model download."""
+    runner.invoke(app, ["init", "proj", "meta-llama/Llama-3.1-8B", "--root", str(tmp_path)])
+    data = tmp_path / "proj" / "dpo.jsonl"
+    rows = [{"prompt": f"Q{i}", "chosen": f"good {i}", "rejected": f"bad {i}"} for i in range(20)]
+    data.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+    result = runner.invoke(app, ["train", "--method", "dpo", "--dataset", str(data),
+                                 "--root", str(tmp_path / "proj"),
+                                 "--accelerator", "unsloth"])
+    assert result.exit_code == 3, result.output
+    assert "tinct[unsloth]" in result.output
+
+
 def test_validate_qwen_model_blocks_llama_data(tmp_path: Path):
     """--model Qwen makes template validation reject Llama-formatted text."""
     runner.invoke(app, ["init", "proj", "meta-llama/Llama-3.1-8B", "--root", str(tmp_path)])
