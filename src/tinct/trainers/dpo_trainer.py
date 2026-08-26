@@ -135,6 +135,8 @@ def run_dpo(
     run_dir: Path,
     beta: float = 0.1,
     lora_rank: int = 16,
+    accelerator: str = "none",
+    max_seq_length: int = 2048,
     per_device_batch_size: int = 1,
     grad_accum_steps: int = 4,
     learning_rate: float = 5e-5,
@@ -145,6 +147,9 @@ def run_dpo(
 ) -> bool:
     """Execute guarded DPO training.
 
+    ``accelerator`` is ``"none"`` (standard HF path) or ``"unsloth"`` for
+    low-VRAM Triton-kernel acceleration (requires ``tinct[unsloth]``).
+
     Returns True on success, or False if halted by a fail-closed guard.
     ``dpo_metrics.json`` is persisted in either case.
     """
@@ -152,8 +157,7 @@ def run_dpo(
     # --- 1. Lazy imports ---
     try:
         import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback
-        from peft import LoraConfig
+        from transformers import TrainerCallback
         from trl import DPOTrainer, DPOConfig
         from datasets import load_dataset
     except ImportError as exc:
@@ -193,34 +197,29 @@ def run_dpo(
                     }, fh)
             return halted
 
-    # --- 4. Load model & tokenizer ---
-    log.info("[tinct] Loading model and tokenizer: %s", model_name_or_path)
-    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+    # --- 4. Load model & tokenizer via the accelerator engine ---
+    # The accelerator applies LoRA itself, so DPOTrainer gets the final model
+    # with no peft_config — one code path for both backends.
+    from tinct.engine.accelerators import load_model_with_accelerator
 
-    # CPU-safe dtype: bf16 on CUDA that supports it, else float32.
+    log.info("[tinct] Loading model with accelerator: %s", accelerator)
+    model, tokenizer = load_model_with_accelerator(
+        model_name=model_name_or_path,
+        accelerator=accelerator,
+        lora_rank=lora_rank,
+        max_seq_length=max_seq_length,
+        load_in_4bit=True,
+    )
+
+    # CPU-safe dtype logic: bf16 only on CUDA that supports it; float32 on CPU.
     has_cuda = torch.cuda.is_available()
     use_bf16 = bool(has_cuda and torch.cuda.is_bf16_supported())
-    torch_dtype = torch.bfloat16 if use_bf16 else torch.float32
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name_or_path, torch_dtype=torch_dtype, device_map="auto",
-    )
 
     # --- 5. Load dataset (expects prompt/chosen/rejected) ---
     log.info("[tinct] Loading DPO dataset: %s", dataset_path)
     dataset = load_dataset("json", data_files=str(dataset_path), split="train")
 
-    # --- 6. Configure DPO + LoRA ---
-    peft_config = LoraConfig(
-        r=lora_rank,
-        lora_alpha=lora_rank * 2,
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
-                        "gate_proj", "up_proj", "down_proj"],
-        lora_dropout=0.05,
-        bias="none",
-        task_type="CAUSAL_LM",
-    )
+    # --- 6. Configure DPO ---
     dpo_config = DPOConfig(
         output_dir=str(run_dir / "checkpoints"),
         beta=beta,
@@ -245,7 +244,6 @@ def run_dpo(
         args=dpo_config,
         train_dataset=dataset,
         processing_class=tokenizer,
-        peft_config=peft_config,
         callbacks=[guard],
     )
 

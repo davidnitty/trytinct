@@ -74,7 +74,7 @@ def prepare_base_model_chunks(
 
 
 def _run_dpo_training(project: Project, doctor: DataDoctor, records, dataset: Path,
-                      run_name: str | None) -> int:
+                      run_name: str | None, accelerator: str = "none") -> int:
     """DPO training: preference dataset (prompt/chosen/rejected) + the Reward
     Inversion Guard. Returns 0 on success, 2 on a fail-closed halt."""
     console = get_console()
@@ -104,6 +104,8 @@ def _run_dpo_training(project: Project, doctor: DataDoctor, records, dataset: Pa
         dataset_path=dataset_out,
         run_dir=run_dir,
         lora_rank=train_cfg.lora_r,
+        accelerator=accelerator,
+        max_seq_length=train_cfg.max_seq_len,
     )
     _materialize_metrics(run_dir)
 
@@ -190,7 +192,8 @@ def run_train(project: Project, dataset: Path, run_name: str | None,
         return 1
 
     if method == "dpo":
-        return _run_dpo_training(project, doctor, records, dataset, run_name)
+        return _run_dpo_training(project, doctor, records, dataset, run_name,
+                                 accelerator=accelerator)
 
     train_records, valid_records = doctor.split(records)
     console.print(f"[bold]Split:[/] {len(train_records)} train / {len(valid_records)} valid")
