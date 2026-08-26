@@ -8,13 +8,14 @@ version = "0.1.0"
 description = "CLI-first post-training stack for LLMs — validate, train, eval, and ship with cryptographic evidence."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 authors = [{ name = "tinct" }]
 keywords = ["llm", "fine-tuning", "lora", "qlora", "post-training", "cli"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "License :: OSI Approved :: Apache Software License",
 ]
 
 # Lightweight core: importing `tinct` must NOT pull in torch/transformers.
