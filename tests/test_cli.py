@@ -26,6 +26,32 @@ def test_train_unsloth_fails_fast_without_dep(tmp_path: Path):
     assert "tinct[unsloth]" in result.output
 
 
+def test_validate_qwen_model_blocks_llama_data(tmp_path: Path):
+    """--model Qwen makes template validation reject Llama-formatted text."""
+    runner.invoke(app, ["init", "proj", "meta-llama/Llama-3.1-8B", "--root", str(tmp_path)])
+    data = tmp_path / "proj" / "llama.jsonl"
+    rows = [{"text": "<|begin_of_text|><|start_header_id|>user<|end_header_id|>"
+                     f"Q{i}<|eot_id|>"} for i in range(20)]
+    data.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+    result = runner.invoke(app, ["validate", str(data), "--root", str(tmp_path / "proj"),
+                                 "--model", "Qwen/Qwen2.5-7B-Instruct"])
+    assert result.exit_code == 1, result.output
+    assert "FAIL" in result.output
+
+
+def test_validate_qwen_model_accepts_qwen_data(tmp_path: Path):
+    """--model Qwen accepts properly formatted Qwen chat templates."""
+    runner.invoke(app, ["init", "proj", "meta-llama/Llama-3.1-8B", "--root", str(tmp_path)])
+    data = tmp_path / "proj" / "qwen.jsonl"
+    rows = [{"text": "<|im_start|>system\nYou are helpful.<|im_end|>\n"
+                     "<|im_start|>user\nQ?<|im_end|>\n"
+                     "<|im_start|>assistant\nA.<|im_end|>"} for _ in range(20)]
+    data.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+    result = runner.invoke(app, ["validate", str(data), "--root", str(tmp_path / "proj"),
+                                 "--model", "Qwen/Qwen2.5-7B-Instruct"])
+    assert result.exit_code == 0, result.output
+
+
 def test_init(tmp_path: Path):
     result = runner.invoke(app, ["init", "proj", "meta-llama/Llama-3.1-8B", "--root", str(tmp_path)])
     assert result.exit_code == 0, result.output

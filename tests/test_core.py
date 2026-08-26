@@ -176,3 +176,92 @@ def test_dpo_dataset_with_identical_pairs_fails(project, tmp_path: Path):
     report, _ = doctor.run(data)
     assert not report.passed
     assert any(r.rule_id == "data.dpo.distinct" for r in report.failed_errors)
+
+
+# -- chat template validation (Qwen / Llama) ---------------------------------
+
+from tinct.core.datadoctor import (  # noqa: E402
+    family_for_model,
+    validate_chat_template,
+    validate_llama_chat_template,
+    validate_qwen_chat_template,
+)
+
+QWEN_GOOD = (
+    "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
+    "<|im_start|>user\nWhat is 2+2?<|im_end|>\n"
+    "<|im_start|>assistant\n2+2 equals 4.<|im_end|>"
+)
+
+
+def test_family_for_model_detects_qwen():
+    assert family_for_model("Qwen/Qwen2.5-7B-Instruct") == "qwen"
+    assert family_for_model("meta-llama/Llama-3.1-8B") == "llama"
+    assert family_for_model("some/unknown-arch") is None
+    assert family_for_model(None) is None
+
+
+def test_validate_qwen_chat_template_valid():
+    assert validate_qwen_chat_template(QWEN_GOOD) == []
+
+
+def test_validate_qwen_chat_template_missing_tokens():
+    errors = validate_qwen_chat_template("user: hello\nassistant: hi")
+    assert any("<|im_start|>" in e for e in errors)
+    assert any("<|im_end|>" in e for e in errors)
+
+
+def test_validate_qwen_chat_template_unbalanced():
+    text = "<|im_start|>user\nhi<|im_end|>\n<|im_start|>assistant\nhello"
+    errors = validate_qwen_chat_template(text)
+    assert any("Unbalanced" in e for e in errors)
+
+
+def test_validate_qwen_chat_template_requires_user_and_assistant():
+    text = "<|im_start|>system\nYou are helpful.<|im_end|>"
+    errors = validate_qwen_chat_template(text)
+    assert any("Missing user message" in e for e in errors)
+    assert any("Missing assistant message" in e for e in errors)
+
+
+def test_validate_llama_chat_template_valid():
+    text = "<|begin_of_text|><|start_header_id|>user<|end_header_id|>hi<|eot_id|>"
+    assert validate_llama_chat_template(text) == []
+
+
+def test_validate_llama_chat_template_missing_eot():
+    errors = validate_llama_chat_template("<|begin_of_text|>user: hi")
+    assert any("<|eot_id|>" in e for e in errors)
+
+
+def test_validate_chat_template_dispatch():
+    assert validate_chat_template(QWEN_GOOD, "qwen") == []
+    assert validate_chat_template("<|begin_of_text|>hi<|eot_id|>", "llama") == []
+    # unknown family only rejects empty text
+    assert validate_chat_template("anything", "unknown") == []
+    assert validate_chat_template("   ", "unknown") == ["Text field is empty."]
+
+
+def test_qwen_template_blocks_llama_data(project, tmp_path: Path):
+    """A Llama-formatted text dataset must fail when validated as Qwen."""
+    rows = [{"text": "<|begin_of_text|><|start_header_id|>user<|end_header_id|>"
+                      f"Q{i}<|eot_id|>"} for i in range(20)]
+    data = tmp_path / "llama.jsonl"
+    data.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+
+    doctor = DataDoctor(project.config.data, max_seq_len=2048, seed=42,
+                        model_family="qwen")
+    report, _ = doctor.run(data)
+    assert not report.passed
+    assert any(r.rule_id == "data.chat_template" for r in report.failed_errors)
+
+
+def test_qwen_template_passes_qwen_data(project, tmp_path: Path):
+    rows = [{"text": QWEN_GOOD} for _ in range(20)]
+    data = tmp_path / "qwen.jsonl"
+    data.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+
+    doctor = DataDoctor(project.config.data, max_seq_len=2048, seed=42,
+                        model_family="qwen")
+    report, _ = doctor.run(data)
+    assert report.passed

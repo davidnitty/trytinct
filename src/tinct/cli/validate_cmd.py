@@ -5,18 +5,26 @@ from __future__ import annotations
 from pathlib import Path
 
 from tinct.cli.render import print_report
-from tinct.core.datadoctor import DataDoctor, DatasetLoadError
+from tinct.core.datadoctor import DataDoctor, DatasetLoadError, family_for_model
 from tinct.utils.logging import get_console
 
 
-def run_validate(project, dataset: Path) -> bool:
-    """Validate ``dataset``; return True if the report passes (fail-closed)."""
-    console = get_console()
-    doctor = DataDoctor(
+def _doctor_for(project, model_override: str | None = None) -> DataDoctor:
+    """Build a DataDoctor, resolving the model family from the override (if any)
+    or the project's configured model."""
+    model = model_override or project.config.train.model
+    return DataDoctor(
         project.config.data,
         max_seq_len=project.config.train.max_seq_len,
         seed=project.config.train.seed,
+        model_family=family_for_model(model),
     )
+
+
+def run_validate(project, dataset: Path, model_override: str | None = None) -> bool:
+    """Validate ``dataset``; return True if the report passes (fail-closed)."""
+    console = get_console()
+    doctor = _doctor_for(project, model_override)
     try:
         report, _records = doctor.run(dataset)
     except DatasetLoadError as exc:
@@ -30,11 +38,7 @@ def run_validate(project, dataset: Path) -> bool:
 def run_advise(project, dataset: Path) -> None:
     """Summarize validation and recommend a post-training method."""
     console = get_console()
-    doctor = DataDoctor(
-        project.config.data,
-        max_seq_len=project.config.train.max_seq_len,
-        seed=project.config.train.seed,
-    )
+    doctor = _doctor_for(project)
     report, records = doctor.run(dataset)
     print_report(console, report)
     if not report.passed:

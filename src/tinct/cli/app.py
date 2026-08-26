@@ -79,10 +79,14 @@ def init(
 def validate(
     dataset: Path = typer.Argument(..., help="JSON/JSONL instruction dataset."),
     root: Path = typer.Option(".", "--root", help="Project root."),
+    model: str | None = typer.Option(
+        None, "--model",
+        help="Model id for family-aware template validation (e.g. Qwen/Qwen2.5-7B-Instruct).",
+    ),
 ) -> None:
     """Validate an instruction dataset with the Data Doctor (fail-closed)."""
     project = _open_project(root)
-    _exit(0 if validate_cmd.run_validate(project, dataset) else 1)
+    _exit(0 if validate_cmd.run_validate(project, dataset, model_override=model) else 1)
 
 
 @app.command("advise")

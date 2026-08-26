@@ -64,27 +64,108 @@ def validate_dpo_row(row: dict, row_idx: int) -> list[str]:
     return errors
 
 
-def validate_chat_template(messages: str, model_family: str) -> list[str]:
-    """Checks if a formatted chat string matches the target model's expected style.
+# Qwen-specific tokens.
+QWEN_IM_START = "<|im_start|>"
+QWEN_IM_END = "<|im_end|>"
+QWEN_SYSTEM = "system"
+QWEN_USER = "user"
+QWEN_ASSISTANT = "assistant"
 
-    Qwen has a very specific, strict chat template — mis-formatted data degrades
-    the model rapidly. ``messages`` is the pre-formatted string, e.g.
-    ``<|im_start|>user\\nHello<|im_end|>`` (Qwen) or Llama-3 BOS/EOT tokens.
+
+def validate_qwen_chat_template(text: str) -> list[str]:
+    """Validate that ``text`` follows Qwen's strict chat-template format.
+
+    Qwen expects message boundaries marked by ``<|im_start|>`` / ``<|im_end|>``,
+    with at least one ``user`` and one ``assistant`` turn. Returns a list of
+    human-readable errors (empty when valid).
     """
     errors: list[str] = []
-    if model_family == "qwen":
-        if "<|im_start|>" not in messages or "<|im_end|>" not in messages:
-            errors.append(
-                "Qwen models require <|im_start|> and <|im_end|> tokens. "
-                "Check your formatting."
-            )
-    elif model_family == "llama":
-        if "<|begin_of_text|>" not in messages or "<|eot_id|>" not in messages:
-            errors.append(
-                "Llama-3 requires specific BOS/EOT tokens "
-                "(<|begin_of_text|>, <|eot_id|>)."
-            )
+
+    if QWEN_IM_START not in text:
+        errors.append(
+            f"Missing {QWEN_IM_START} token. Qwen models require this token "
+            "to mark message boundaries."
+        )
+    if QWEN_IM_END not in text:
+        errors.append(
+            f"Missing {QWEN_IM_END} token. Qwen models require this token "
+            "to mark message endings."
+        )
+
+    # If the boundary tokens are missing there is no point checking structure.
+    if errors:
+        return errors
+
+    start_count = text.count(QWEN_IM_START)
+    end_count = text.count(QWEN_IM_END)
+    if start_count != end_count:
+        errors.append(
+            f"Unbalanced tokens: {start_count} {QWEN_IM_START} vs "
+            f"{end_count} {QWEN_IM_END}. Every message must be properly closed."
+        )
+
+    compact = text.replace("\n", "")
+    if f"{QWEN_IM_START}{QWEN_USER}" not in compact:
+        errors.append(
+            f"Missing user message. Expected format: {QWEN_IM_START}{QWEN_USER}"
+            f"\\n...{QWEN_IM_END}"
+        )
+    if f"{QWEN_IM_START}{QWEN_ASSISTANT}" not in compact:
+        errors.append(
+            f"Missing assistant message. Expected format: "
+            f"{QWEN_IM_START}{QWEN_ASSISTANT}\\n...{QWEN_IM_END}"
+        )
     return errors
+
+
+def validate_llama_chat_template(text: str) -> list[str]:
+    """Validate that ``text`` follows Llama-3's chat-template format."""
+    errors: list[str] = []
+
+    if "<|begin_of_text|>" not in text and "<|start_header_id|>" not in text:
+        errors.append(
+            "Missing Llama-3 tokens. Expected <|begin_of_text|> or "
+            "<|start_header_id|> markers."
+        )
+    if "<|eot_id|>" not in text:
+        errors.append(
+            "Missing <|eot_id|> (end-of-turn) token. Llama-3 requires this "
+            "to mark message boundaries."
+        )
+    return errors
+
+
+def family_for_model(model_name: str | None) -> str | None:
+    """Return the model family for ``model_name`` (lenient).
+
+    Reuses the canonical :func:`tinct.core.model_gate.detect_model_family`
+    detection but returns ``None`` for unrecognized families instead of
+    raising, so template validation is simply skipped for unknown models.
+    """
+    if not model_name:
+        return None
+    from tinct.core.model_gate import detect_model_family
+
+    try:
+        return detect_model_family(model_name)
+    except ValueError:
+        return None
+
+
+def validate_chat_template(text: str, model_family: str) -> list[str]:
+    """Validate a formatted chat string against the target model family.
+
+    Returns a list of errors (empty when valid). Unknown families only require
+    non-empty text (no structural template check).
+    """
+    if model_family == "qwen":
+        return validate_qwen_chat_template(text)
+    elif model_family == "llama":
+        return validate_llama_chat_template(text)
+    else:
+        if not text or not text.strip():
+            return ["Text field is empty."]
+        return []
 
 
 class DataDoctor:
