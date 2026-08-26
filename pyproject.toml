@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tinct"
-version = "0.1.0"
+version = "0.4.0"
 description = "CLI-first post-training stack for LLMs — validate, train, eval, and ship with cryptographic evidence."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -52,6 +52,11 @@ unsloth = [
 full = [
     "tinct[train]",
     "tinct[eval]",
+]
+all = [
+    "tinct[train]",
+    "tinct[eval]",
+    "tinct[unsloth]",
 ]
 dev = [
     "pytest>=8.0",

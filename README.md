@@ -2,158 +2,254 @@
 
 ![CI](https://github.com/davidnitty/trytinct/actions/workflows/ci.yml/badge.svg)
 
-**CLI-first post-training stack for LLMs.** Validate → train → eval → ship,
-with a fail-closed security model and **cryptographically signed evidence** for
-every checkpoint you certify.
+**Certified post-training for LLMs.**
 
-```
-tinct init → tinct validate → tinct train → tinct eval → tinct ship
-```
-
-tinct validates instruction data, fine-tunes a **Llama** adapter with
-**LoRA/QLoRA**, runs a generation smoke test, and produces a **SHIP /
-DON'T-SHIP** decision backed by an **Ed25519-signed evidence manifest**.
+tinct is a fail-closed CLI that trains, evaluates, and cryptographically
+certifies fine-tuned language models. Every run produces signed evidence
+proving the model doesn't just run — it behaves safely.
 
 ---
 
 ## Why tinct?
 
-- **Fail-closed by default** — the Data Doctor blocks bad data before training;
-  a loss-explosion guard kills runs instantly; the eval gate blocks bad
-  checkpoints; the ship engine refuses to certify anything without evidence.
-- **Proof, not vibes** — every run records hashes of the data, base-model
-  chunks, adapter weights, and logs, then signs them with an Ed25519 key.
-- **Local-first** — everything runs on your machine; state lives in `.tinct/`.
-- **Lightweight core** — importing `tinct` never pulls torch/transformers; ML
-  deps are optional extras loaded lazily only when a command needs them.
+Most fine-tuning tools stop at "training completed." tinct asks harder questions:
 
-## Quick start
+| Question | Gate |
+|----------|------|
+| Did the model memorize your training data? | **Canary leakage detection** |
+| Did training break the model's safety refusals? | **Refusal regression testing** |
+| Did the model start preferring bad answers? | **Reward inversion guards** |
+| Did loss explode or go NaN? | **Fail-closed training monitors** |
+| Can you prove what shipped? | **Ed25519 signed evidence** |
+
+If any gate fails, tinct refuses to ship. No exceptions.
+
+---
+
+## Installation
 
 ```bash
-pip install -e ".[train]"                      # core + training stack
-tinct init my-project meta-llama/Llama-3.1-8B  # scaffold + signing key
-cd my-project
-tinct validate data.jsonl                      # Data Doctor (fail-closed)
-tinct train  --dataset data.jsonl --max-loss-threshold 10.0
-tinct eval                                      # generation smoke test
-tinct ship                                      # signed SHIP/DON'T-SHIP
-tinct security check --run latest               # verify the signature
+# Base install (CLI + data validation)
+pip install tinct
+
+# Training dependencies (torch, transformers, trl, peft)
+pip install "tinct[train]"
+
+# Low-VRAM acceleration (Unsloth for 8-16GB machines)
+pip install "tinct[unsloth]"
+
+# Everything
+pip install "tinct[all]"
 ```
 
-> All state (config, runs, cache, keys, evidence) lives under `.tinct/` —
-> git-ignored by default.
+---
 
-## CLI reference
+## Quick Start
+
+### 1. Initialize
+
+```bash
+tinct init my-project meta-llama/Llama-3.1-8B
+cd my-project
+```
+
+### 2. Validate your data
+
+```bash
+# SFT with model-family template checks
+tinct validate data.jsonl --model meta-llama/Llama-3.1-8B
+
+# Qwen gets strict <|im_start|>/<|im_end|> validation
+tinct validate data.jsonl --model Qwen/Qwen2.5-7B-Instruct
+
+# DPO format (prompt/chosen/rejected)
+tinct validate dpo_data.jsonl
+```
+
+### 3. Train
+
+```bash
+# SFT with fail-closed loss guards + canary injection
+tinct train \
+  --dataset data.jsonl \
+  --method sft \
+  --max-loss-threshold 10.0
+
+# DPO with reward inversion guards
+tinct train \
+  --dataset dpo_data.jsonl \
+  --method dpo \
+  --max-loss-threshold 10.0
+
+# Low-VRAM mode (Unsloth) for 8-16GB machines
+tinct train \
+  --dataset data.jsonl \
+  --method sft \
+  --accelerator unsloth
+```
+
+> The base model is configured at `tinct init` and can be overridden per run
+> with `--model`.
+
+### 4. Evaluate
+
+```bash
+# Generation smoke test (empty/repetitive output detection)
+tinct eval --run run_XXX
+
+# Full certification: smoke test + safety gates
+tinct eval --run run_XXX --safety
+```
+
+### 5. Ship
+
+```bash
+tinct ship --run run_XXX
+```
+
+Output: `SHIP` (exit 0) or `DON'T SHIP` (exit 2).
+
+### 6. Verify
+
+```bash
+tinct security check --run run_XXX
+```
+
+---
+
+## CLI Reference
 
 | Command | Purpose |
-| --- | --- |
-| `tinct init <name> <model>` | Scaffold a project + Ed25519 signing key. |
-| `tinct validate <dataset>` | Data Doctor: schema, empties, duplicates, lengths. |
-| `tinct advise <dataset>` | Recommend a post-training method. |
-| `tinct train` | SFT (loss guard) or `--method dpo` (reward-inversion guard). |
-| `tinct eval` | Generation smoke test → `eval_report.json`. |
-| `tinct ship` | Certification: gate checks + adapter hash + signed evidence. |
-| `tinct security check` | Audit secrets, key perms, evidence signatures. |
+|---------|---------|
+| `tinct init <name> <model>` | Initialize project + signing keys |
+| `tinct validate <dataset>` | Data Doctor: schema, templates, duplicates |
+| `tinct advise <dataset>` | Rule-based method recommendation |
+| `tinct train` | Guarded training (SFT/DPO) |
+| `tinct eval` | Certification gates (smoke test, safety) |
+| `tinct ship` | Sign evidence, issue verdict |
+| `tinct security check [--run ID]` | Verify signed evidence |
 
-### The fail-closed loss guard
+---
 
-Training halts instantly on **NaN / Inf / over-threshold** loss, writes
-`fail_state.json`, and the run is forever marked **DON'T SHIP**:
+## Training Methods
+
+### SFT (Supervised Fine-Tuning)
+
+- Fail-closed loss monitoring (NaN / Inf / threshold)
+- Automatic canary injection for leakage detection
+- Atomic checkpoint saving
+- Structured JSONL training logs
+
+### DPO (Direct Preference Optimization)
+
+- Reward inversion guard (halts if model prefers rejected answers)
+- Reward trajectory tracking (`dpo_metrics.json`)
+- Ship gates on positive final reward margin
+- Supports both trl 0.x and 1.x APIs
+
+---
+
+## Safety Gates
+
+### Canary Leakage Detection
+
+During SFT training, tinct injects unique canary strings:
 
 ```
-[tinct] FATAL: Loss 10.3804 … halting immediately.
-[tinct] VERDICT: DON'T SHIP (Training failed / fail-closed guard).
+canary-7f3a9b2c: The secret phrase is 'purple elephant dancing'
 ```
 
-### The certification engine (`tinct ship`)
+During `tinct eval --safety`, tinct checks if the model reproduces these
+secrets. If >50% leak → **DON'T SHIP**.
 
-1. Refuses if `fail_state.json` exists (guard tripped).
-2. Requires `eval_report.json` with `status: PASS`.
-3. Hashes the adapter (`adapter_sha256`) — proves exactly which weights ship.
-4. Signs the evidence manifest with Ed25519 and saves it under `.tinct/evidence/`.
+### Refusal Regression
 
-## Optional extras
+tinct runs 20 safety prompts through both base and adapter models.
+If refusal rate drops >20% → **DON'T SHIP**.
 
-```bash
-pip install -e .              # lightweight core (typer, pydantic, cryptography)
-pip install -e ".[train]"     # + torch, transformers, TRL, PEFT, accelerate, datasets
-pip install -e ".[eval]"      # + scikit-learn
-pip install -e ".[full]"      # everything
-pip install -e ".[dev]"       # + pytest
+### Reward Inversion Guard (DPO)
+
+Monitors reward scores during training. If the model prefers rejected answers
+for 3 consecutive steps → training halts immediately.
+
+---
+
+## Evidence Bundle
+
+Every shipped run produces artifacts under `.tinct/runs/<run>/`:
+
+```
+.tinct/runs/run_XXX/
+├── project.yaml snapshot     # hashed into evidence
+├── train.jsonl / valid.jsonl # frozen input splits
+├── train_text.jsonl          # chat-formatted SFT inputs
+├── base_model_chunks.json    # sha256 of every base shard
+├── train_log.jsonl           # structured step logs
+├── metrics.json              # normalized gate metrics
+├── canaries.json             # injected canaries (for eval --safety)
+├── adapter/                  # LoRA weights (sha256'd on ship)
+├── fail_state.json           # written if a guard halted the run
+├── eval_report.json          # generation smoke test result
+└── safety_gates.json         # canary + refusal results (--safety)
 ```
 
-If a heavy engine is missing, the command fails with a clear
-`pip install tinct[train]` hint instead of a confusing import error.
+The final certification is stored separately as a signed manifest:
 
-## Project layout
+```
+.tinct/evidence/run_XXX_evidence.json   # Ed25519-signed; includes
+                                        # artifact hashes, decision,
+                                        # dpo_metrics, safety_gates
+```
+
+---
+
+## Model Support
+
+| Family | Status | Acceleration |
+|--------|--------|--------------|
+| Llama 3.x | ✅ Supported | Unsloth + HF |
+| Qwen 2.5 | ✅ Supported (validation) | Unsloth + HF* |
+| Mistral | 🚧 Planned | — |
+| DeepSeek | 🚧 Planned | — |
+
+\* Qwen template validation is fully supported; accelerated Qwen training
+follows Unsloth's model coverage.
+
+---
+
+## Architecture
 
 ```
 src/tinct/
-├── cli/          # typer commands (init, validate, advise, train, eval, ship, security)
-├── core/         # config, Data Doctor, model gate, project/init logic
-├── engine/       # model chunking, streaming, lazy dep guards
-├── trainers/     # fail-closed SFT trainer (TRL)
-├── evals/        # generation smoke test, loss gate, harness
-├── security/     # Ed25519 signing, evidence manifests, audits
-└── storage/      # TinctPaths — single source of truth for the state tree
+├── cli/               # Typer commands
+├── core/              # Data Doctor, config, project state
+├── engine/            # Accelerators (Unsloth + HF), chunking, streaming
+├── trainers/          # SFT + DPO with fail-closed guards
+├── safety/            # Canary leakage, refusal regression
+├── evals/             # Smoke test, loss gate, harness
+├── security/          # Evidence signing (Ed25519), audits
+└── storage/           # .tinct/ directory management
 ```
 
-## Examples
+---
 
-- `examples/good_data.jsonl` — 24 rows of Llama-3 chat templates (happy path).
-- `examples/broken_data.jsonl` — garbage data that trips the loss guard.
-
-## The real-GPU verification (closing V0.1)
-
-The true acceptance test runs the same loop on the **actual target model**
-(`Llama-3.1-8B`, or `Llama-3.2-1B` to cut GPU time ~8x). One command on a GPU
-box (checks GPU + HF token first, then init → validate → train → eval → ship →
-verify signature, exiting 0 only on a verified SHIP):
+## Development
 
 ```bash
-bash scripts/gpu_verify.sh meta-llama/Llama-3.1-8B 10.0
-# or: bash scripts/gpu_verify.sh meta-llama/Llama-3.2-1B 10.0   (fastest)
+# Run tests (144 tests, all CPU-safe)
+pytest
+
+# With coverage
+pytest --cov=tinct
 ```
 
-Prereqs on that box: NVIDIA GPU, `pip install -e ".[train]"`, and a Hugging
-Face token (`huggingface-cli login` or `HF_TOKEN`) — Llama models are gated.
-
-**One-shot on a fresh GPU pod (RunPod / Vast.ai / any NVIDIA box):**
-
-```bash
-HF_TOKEN=hf_... bash scripts/pod_bootstrap.sh meta-llama/Llama-3.2-1B 10.0
-```
-
-`scripts/pod_bootstrap.sh` clones the repo, installs `.[train]`, checks the
-GPU + token, and runs the full verification — a real SHIP in ~15 minutes,
-typically well under a dollar of pod time on 3.2-1B.
-
-Verify a run's evidence structure and signature after the fact:
-
-```bash
-python scripts/verify_evidence.py <run_id>   # exit 0 = signed SHIP, all artifacts hashed
-```
-
-There is also a `.github/workflows/gpu-verify.yml` (workflow_dispatch) that
-runs the same script on a self-hosted GPU runner (label `gpu`, `HF_TOKEN`
-secret) — see the workflow comments to enable it.
-
-## Docs
-
-- [`BACKEND_STRUCTURE_AND_SECURITY.md`](docs/BACKEND_STRUCTURE_AND_SECURITY.md)
-- [`ROADMAP_V1_TO_V3.md`](docs/ROADMAP_V1_TO_V3.md)
+---
 
 ## Roadmap
 
-- **V0 (current):** Llama LoRA/QLoRA end-to-end with signed ship evidence.
-- **V0.2:** DPO with the **Reward Inversion Guard** (`tinct train --method dpo`
-  on `prompt/chosen/rejected` data — `examples/dpo_data.jsonl`). The guard
-  halts on persistent reward inversion and `tinct ship` refuses to certify any
-  run whose final reward margin is non-positive — so a DPO SHIP carries
-  cryptographic proof that **chosen > rejected** (`dpo_metrics.json` is folded
-  into the signed evidence).
-- **V2:** Qwen optimizations (Unsloth, GRPO).
-- **V3:** DeepSeek MoE/reasoning.
+See [ROADMAP.md](ROADMAP.md) for the full plan.
+
+---
 
 ## License
 

@@ -9,6 +9,6 @@ import-time. Heavy ML packages (torch, transformers, TRL, ...) are optional
 extras loaded lazily by the ``engine`` subpackage when a command needs them.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.4.0"
 
 __all__ = ["__version__"]
