@@ -27,15 +27,19 @@ def load_model_with_accelerator(
     accelerator: str = "none",
     lora_rank: int = 16,
     max_seq_length: int = 2048,
+    load_in_4bit: bool = True,
 ):
     """Load the base model and apply LoRA, optionally via Unsloth.
 
-    Returns ``(model, tokenizer)``. ``accelerator`` is ``"none"`` (standard
-    Hugging Face path) or ``"unsloth"`` (massive VRAM reduction).
+    Returns ``(model, tokenizer)`` — the model is already LoRA-wrapped, ready
+    for ``SFTTrainer`` without a ``peft_config``. ``accelerator`` is ``"none"``
+    (standard Hugging Face path) or ``"unsloth"`` (massive VRAM reduction).
+    ``load_in_4bit`` enables 4-bit QLoRA on the standard path when CUDA +
+    bitsandbytes are available (falls back to standard LoRA otherwise).
     """
     if accelerator == "unsloth":
         return _load_unsloth(model_name, lora_rank, max_seq_length)
-    return _load_standard(model_name, lora_rank)
+    return _load_standard(model_name, lora_rank, load_in_4bit=load_in_4bit)
 
 
 def _load_unsloth(model_name: str, lora_rank: int, max_seq_length: int):
@@ -67,11 +71,11 @@ def _load_unsloth(model_name: str, lora_rank: int, max_seq_length: int):
     return model, tokenizer
 
 
-def _load_standard(model_name: str, lora_rank: int):
-    """Standard Hugging Face fallback (CPU-safe dtype)."""
+def _load_standard(model_name: str, lora_rank: int, load_in_4bit: bool = True):
+    """Standard Hugging Face loading (CPU-safe) with optional 4-bit QLoRA."""
     import torch
-    from peft import LoraConfig, get_peft_model
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
     log.info("[tinct] Loading %s via standard Hugging Face...", model_name)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -80,9 +84,30 @@ def _load_standard(model_name: str, lora_rank: int):
 
     has_cuda = torch.cuda.is_available()
     torch_dtype = torch.bfloat16 if (has_cuda and torch.cuda.is_bf16_supported()) else torch.float32
+
+    bnb_config = None
+    if load_in_4bit and has_cuda:
+        try:
+            import bitsandbytes  # noqa: F401
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch_dtype,
+                bnb_4bit_use_double_quant=True,
+            )
+            log.info("[tinct] bitsandbytes detected. Using 4-bit QLoRA.")
+        except ImportError:
+            log.info("[tinct] bitsandbytes missing. Using standard LoRA.")
+
     model = AutoModelForCausalLM.from_pretrained(
-        model_name, device_map="auto", torch_dtype=torch_dtype,
+        model_name,
+        quantization_config=bnb_config,
+        device_map="auto",
+        torch_dtype=torch_dtype if not bnb_config else None,
+        trust_remote_code=False,  # security: never execute remote code
     )
+    if bnb_config:
+        model = prepare_model_for_kbit_training(model)
 
     lora_config = LoraConfig(
         r=lora_rank,

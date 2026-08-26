@@ -101,9 +101,7 @@ def run_sft(
     # --- 1. Lazy imports (heavy dependencies) ---
     try:
         import torch
-        from transformers import (AutoModelForCausalLM, AutoTokenizer,
-                                  BitsAndBytesConfig, TrainerCallback)
-        from peft import LoraConfig, TaskType, prepare_model_for_kbit_training
+        from transformers import TrainerCallback
         from trl import SFTConfig, SFTTrainer
         from datasets import load_dataset
     except ImportError as exc:
@@ -130,75 +128,30 @@ def run_sft(
         def on_log(self, args, state, control, logs=None, **kwargs):
             return FailClosedCore.on_log(self, state, control, logs)
 
-    # --- 4. Load tokenizer & model ---
-    # Security: block remote code execution by default.
-    trust_remote_code = False
+    # --- 4. Load tokenizer & model via the accelerator engine ---
+    # The accelerator applies LoRA itself, so SFTTrainer is only given the
+    # final model (no peft_config) — one code path for both backends.
+    from tinct.engine.accelerators import load_model_with_accelerator
+
+    log.info("[tinct] Loading model with accelerator: %s", accelerator)
+    model, tokenizer = load_model_with_accelerator(
+        model_name=model_name_or_path,
+        accelerator=accelerator,
+        lora_rank=lora_rank,
+        max_seq_length=max_seq_length,
+        load_in_4bit=True,  # QLoRA by default for memory safety
+    )
 
     # CPU-safe dtype logic: bf16 only on CUDA that supports it; float32 on CPU.
     has_cuda = torch.cuda.is_available()
     use_bf16 = bool(has_cuda and torch.cuda.is_bf16_supported())
-    torch_dtype = torch.bfloat16 if use_bf16 else torch.float32
-    peft_config = None
-    bnb_config = None
+    use_8bit_optim = accelerator != "unsloth" and has_cuda
 
-    if accelerator == "unsloth":
-        # Triton-kernel acceleration; model + tokenizer come back ready.
-        from tinct.engine.accelerators import load_model_with_accelerator
-        model, tokenizer = load_model_with_accelerator(
-            model_name_or_path, accelerator="unsloth", lora_rank=lora_rank,
-            max_seq_length=max_seq_length,
-        )
-        log.info("[tinct] Unsloth model loaded for low-VRAM training.")
-    else:
-        try:
-            import bitsandbytes  # noqa: F401
-            if not has_cuda:
-                raise ImportError("bitsandbytes requires CUDA; using 16-bit LoRA on CPU")
-            bnb_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_quant_type="nf4",
-                bnb_4bit_compute_dtype=torch_dtype,
-                bnb_4bit_use_double_quant=True,
-            )
-            log.info("[tinct] bitsandbytes detected. Using 4-bit QLoRA.")
-        except ImportError:
-            log.info("[tinct] bitsandbytes missing/unsupported. Using standard LoRA.")
-
-        log.info("[tinct] Loading tokenizer and model: %s", model_name_or_path)
-        tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name_or_path,
-            quantization_config=bnb_config,
-            device_map="auto",  # accelerate disk-to-VRAM offloading
-            torch_dtype=torch_dtype if not bnb_config else None,
-            trust_remote_code=trust_remote_code,
-        )
-        if bnb_config:
-            model = prepare_model_for_kbit_training(model)
-
-    # --- 5. Configure LoRA (skipped for Unsloth — peft is already applied) ---
-    peft_config = (
-        LoraConfig(
-            r=lora_rank,
-            lora_alpha=lora_rank * 2,
-            target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
-                            "gate_proj", "up_proj", "down_proj"],
-            lora_dropout=0.05,
-            bias="none",
-            task_type=TaskType.CAUSAL_LM,
-        )
-        if not (accelerator == "unsloth")
-        else None
-    )
-
-    # --- 6. Load dataset ---
+    # --- 5. Load dataset ---
     log.info("[tinct] Loading dataset: %s", dataset_path)
     dataset = load_dataset("json", data_files=str(dataset_path), split="train")
 
-    # --- 7. Training arguments ---
+    # --- 6. Training arguments ---
     sft_config = SFTConfig(
         output_dir=str(output_dir),
         num_train_epochs=num_train_epochs,
@@ -208,7 +161,7 @@ def run_sft(
         fp16=has_cuda and not use_bf16,
         bf16=use_bf16,
         logging_steps=logging_steps,
-        optim="paged_adamw_8bit" if bnb_config else "adamw_torch",
+        optim="paged_adamw_8bit" if use_8bit_optim else "adamw_torch",
         save_strategy="epoch",
         report_to="none",
         max_length=max_seq_length,
@@ -216,7 +169,7 @@ def run_sft(
         packing=False,  # one formatted text sequence per example
     )
 
-    # --- 8. Initialize trainer ---
+    # --- 7. Initialize trainer ---
     callback = TinctFailClosedCallback(
         threshold=max_loss_threshold,
         log_path=log_file,
@@ -226,7 +179,6 @@ def run_sft(
         model=model,
         args=sft_config,
         train_dataset=dataset,
-        peft_config=peft_config,
         processing_class=tokenizer,
         callbacks=[callback],
     )
