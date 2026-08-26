@@ -118,10 +118,25 @@ def _run_dpo_training(project: Project, doctor: DataDoctor, records, dataset: Pa
     return 0
 
 
+def _doctor_for(project: Project) -> DataDoctor:
+    try:
+        from tinct.core.model_gate import detect_model_family
+        family = detect_model_family(project.config.train.model)
+    except ValueError:
+        family = None
+    return DataDoctor(
+        project.config.data,
+        max_seq_len=project.config.train.max_seq_len,
+        seed=project.config.train.seed,
+        model_family=family,
+    )
+
+
 def run_train(project: Project, dataset: Path, run_name: str | None,
               model_override: str | None, method: str = "sft",
               lora_rank_override: int | None = None,
-              max_loss_threshold_override: float | None = None) -> int:
+              max_loss_threshold_override: float | None = None,
+              accelerator: str = "none") -> int:
     """Validate, split, train. Returns 0 on success, non-zero otherwise."""
     console = get_console()
 
@@ -130,6 +145,14 @@ def run_train(project: Project, dataset: Path, run_name: str | None,
     if method not in ("sft", "dpo"):
         console.print(f"[bold red]Method {method!r} is not supported. Use 'sft' or 'dpo'.[/]")
         return 1
+
+    # Fail-closed 0b: accelerator must be known.
+    if accelerator not in ("none", "unsloth"):
+        console.print(f"[bold red]Accelerator {accelerator!r} is not supported. Use 'none' or 'unsloth'.[/]")
+        return 1
+    if method == "dpo" and accelerator == "unsloth":
+        console.print("[yellow]Unsloth is not yet wired into DPO; falling back to 'none'.[/]")
+        accelerator = "none"
 
     # Fail-closed 1: unsupported model family (security gate).
     if model_override:
@@ -144,11 +167,7 @@ def run_train(project: Project, dataset: Path, run_name: str | None,
         project.config.train.lora_r = lora_rank_override
 
     # Fail-closed 2: data must pass the Data Doctor.
-    doctor = DataDoctor(
-        project.config.data,
-        max_seq_len=project.config.train.max_seq_len,
-        seed=project.config.train.seed,
-    )
+    doctor = _doctor_for(project)
     try:
         report, records = doctor.run(dataset)
     except DatasetLoadError as exc:
@@ -202,19 +221,24 @@ def run_train(project: Project, dataset: Path, run_name: str | None,
                 else project.config.max_loss_threshold)
     console.print(f"[bold]Fail-closed loss threshold:[/] {max_loss}")
 
-    ok_run = run_sft(
-        model_name_or_path=str(model_path),
-        dataset_path=text_path,
-        run_dir=run_dir,
-        lora_rank=train_cfg.lora_r,
-        max_loss_threshold=max_loss,
-        num_train_epochs=train_cfg.num_epochs,
-        per_device_batch_size=train_cfg.batch_size,
-        grad_accum_steps=train_cfg.grad_accum_steps,
-        learning_rate=train_cfg.learning_rate,
-        logging_steps=train_cfg.logging_steps,
-        max_seq_length=train_cfg.max_seq_len,
-    )
+    try:
+        ok_run = run_sft(
+            model_name_or_path=str(model_path),
+            dataset_path=text_path,
+            run_dir=run_dir,
+            lora_rank=train_cfg.lora_r,
+            max_loss_threshold=max_loss,
+            num_train_epochs=train_cfg.num_epochs,
+            per_device_batch_size=train_cfg.batch_size,
+            grad_accum_steps=train_cfg.grad_accum_steps,
+            learning_rate=train_cfg.learning_rate,
+            logging_steps=train_cfg.logging_steps,
+            max_seq_length=train_cfg.max_seq_len,
+            accelerator=accelerator,
+        )
+    except ImportError as exc:
+        console.print(f"[bold red]Cannot train:[/] {escape(str(exc))}")
+        return 3
     # Normalize the fail-closed log into metrics.json for the eval gate.
     _materialize_metrics(run_dir)
 

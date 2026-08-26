@@ -89,8 +89,12 @@ def run_sft(
     learning_rate: float = 2e-4,
     logging_steps: int = 10,
     max_seq_length: int = 2048,
+    accelerator: str = "none",
 ) -> bool:
     """Execute a guarded SFT run.
+
+    ``accelerator`` is ``"none"`` (standard HF path) or ``"unsloth"`` for
+    low-VRAM Triton-kernel acceleration (requires ``tinct[unsloth]``).
 
     Returns True on success, or False if halted by a fail-closed guard.
     """
@@ -127,11 +131,6 @@ def run_sft(
             return FailClosedCore.on_log(self, state, control, logs)
 
     # --- 4. Load tokenizer & model ---
-    log.info("[tinct] Loading tokenizer and model: %s", model_name_or_path)
-    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-
     # Security: block remote code execution by default.
     trust_remote_code = False
 
@@ -139,41 +138,60 @@ def run_sft(
     has_cuda = torch.cuda.is_available()
     use_bf16 = bool(has_cuda and torch.cuda.is_bf16_supported())
     torch_dtype = torch.bfloat16 if use_bf16 else torch.float32
+    peft_config = None
     bnb_config = None
-    try:
-        import bitsandbytes  # noqa: F401
-        if not has_cuda:
-            raise ImportError("bitsandbytes requires CUDA; using 16-bit LoRA on CPU")
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch_dtype,
-            bnb_4bit_use_double_quant=True,
+
+    if accelerator == "unsloth":
+        # Triton-kernel acceleration; model + tokenizer come back ready.
+        from tinct.engine.accelerators import load_model_with_accelerator
+        model, tokenizer = load_model_with_accelerator(
+            model_name_or_path, accelerator="unsloth", lora_rank=lora_rank,
+            max_seq_length=max_seq_length,
         )
-        log.info("[tinct] bitsandbytes detected. Using 4-bit QLoRA.")
-    except ImportError:
-        log.info("[tinct] bitsandbytes missing/unsupported. Using standard LoRA.")
+        log.info("[tinct] Unsloth model loaded for low-VRAM training.")
+    else:
+        try:
+            import bitsandbytes  # noqa: F401
+            if not has_cuda:
+                raise ImportError("bitsandbytes requires CUDA; using 16-bit LoRA on CPU")
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch_dtype,
+                bnb_4bit_use_double_quant=True,
+            )
+            log.info("[tinct] bitsandbytes detected. Using 4-bit QLoRA.")
+        except ImportError:
+            log.info("[tinct] bitsandbytes missing/unsupported. Using standard LoRA.")
 
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name_or_path,
-        quantization_config=bnb_config,
-        device_map="auto",  # accelerate disk-to-VRAM offloading
-        torch_dtype=torch_dtype if not bnb_config else None,
-        trust_remote_code=trust_remote_code,
-    )
+        log.info("[tinct] Loading tokenizer and model: %s", model_name_or_path)
+        tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
 
-    if bnb_config:
-        model = prepare_model_for_kbit_training(model)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name_or_path,
+            quantization_config=bnb_config,
+            device_map="auto",  # accelerate disk-to-VRAM offloading
+            torch_dtype=torch_dtype if not bnb_config else None,
+            trust_remote_code=trust_remote_code,
+        )
+        if bnb_config:
+            model = prepare_model_for_kbit_training(model)
 
-    # --- 5. Configure LoRA ---
-    peft_config = LoraConfig(
-        r=lora_rank,
-        lora_alpha=lora_rank * 2,
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
-                        "gate_proj", "up_proj", "down_proj"],
-        lora_dropout=0.05,
-        bias="none",
-        task_type=TaskType.CAUSAL_LM,
+    # --- 5. Configure LoRA (skipped for Unsloth — peft is already applied) ---
+    peft_config = (
+        LoraConfig(
+            r=lora_rank,
+            lora_alpha=lora_rank * 2,
+            target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                            "gate_proj", "up_proj", "down_proj"],
+            lora_dropout=0.05,
+            bias="none",
+            task_type=TaskType.CAUSAL_LM,
+        )
+        if not (accelerator == "unsloth")
+        else None
     )
 
     # --- 6. Load dataset ---

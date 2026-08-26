@@ -109,6 +109,10 @@ def train(
     max_loss_threshold: float | None = typer.Option(
         None, "--max-loss-threshold", help="Override the fail-closed loss threshold."
     ),
+    accelerator: str = typer.Option(
+        "none", "--accelerator",
+        help="Acceleration backend: 'none' or 'unsloth' (low-VRAM, needs tinct[unsloth]).",
+    ),
 ) -> None:
     """Validate then fine-tune a Llama adapter (LoRA/QLoRA), fail-closed."""
     dataset_path = dataset_opt or dataset
@@ -117,7 +121,8 @@ def train(
     project = _open_project(root)
     _exit(train_cmd.run_train(project, dataset_path, run, model,
                               method=method, lora_rank_override=lora_rank,
-                              max_loss_threshold_override=max_loss_threshold))
+                              max_loss_threshold_override=max_loss_threshold,
+                              accelerator=accelerator))
 
 
 @app.command("eval")

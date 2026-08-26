@@ -64,14 +64,40 @@ def validate_dpo_row(row: dict, row_idx: int) -> list[str]:
     return errors
 
 
+def validate_chat_template(messages: str, model_family: str) -> list[str]:
+    """Checks if a formatted chat string matches the target model's expected style.
+
+    Qwen has a very specific, strict chat template — mis-formatted data degrades
+    the model rapidly. ``messages`` is the pre-formatted string, e.g.
+    ``<|im_start|>user\\nHello<|im_end|>`` (Qwen) or Llama-3 BOS/EOT tokens.
+    """
+    errors: list[str] = []
+    if model_family == "qwen":
+        if "<|im_start|>" not in messages or "<|im_end|>" not in messages:
+            errors.append(
+                "Qwen models require <|im_start|> and <|im_end|> tokens. "
+                "Check your formatting."
+            )
+    elif model_family == "llama":
+        if "<|begin_of_text|>" not in messages or "<|eot_id|>" not in messages:
+            errors.append(
+                "Llama-3 requires specific BOS/EOT tokens "
+                "(<|begin_of_text|>, <|eot_id|>)."
+            )
+    return errors
+
+
 class DataDoctor:
     """Stateless validator. Each :meth:`run` produces a fresh report."""
 
-    def __init__(self, config: DataConfig, max_seq_len: int = 2048, seed: int = 42) -> None:
+    def __init__(self, config: DataConfig, max_seq_len: int = 2048, seed: int = 42,
+                 model_family: str | None = None) -> None:
         self.config = config
         self.max_seq_len = max_seq_len
         self.seed = seed
-        # Which schema the last run() validated against ("instruct"/"text").
+        # Family-specific chat-template enforcement ("llama"/"qwen"/None=skip).
+        self.model_family = model_family
+        # Which schema the last run() validated against ("instruct"/"text"/"dpo").
         self.format_used: str = config.format
 
     # -- loading ------------------------------------------------------------
@@ -163,10 +189,28 @@ class DataDoctor:
             self._check_lengths(report, records)
             self._check_token_estimate(report, records)
             self._check_output_diversity(report, records)
+            if self.model_family and self.format_used == "text":
+                self._check_chat_template(report, records)
 
         return report, records
 
     # -- individual checks --------------------------------------------------
+
+    def _check_chat_template(self, report: RuleReport, records: List[Dict[str, Any]]) -> None:
+        """Family-specific chat-template style enforcement (Qwen strict)."""
+        sampled = records[: min(5, len(records))]
+        for rec in sampled:
+            text = str(rec.get("text", ""))
+            errors = validate_chat_template(text, self.model_family or "")
+            if errors:
+                report.add(error(
+                    "data.chat_template", "Chat template style",
+                    errors[0],
+                    meta={"model_family": self.model_family},
+                ))
+                return
+        report.add(ok("data.chat_template", "Chat template style",
+                      f"Formatted per the {self.model_family} template."))
 
     def _check_dpo(self, report: RuleReport, records: List[Dict[str, Any]]) -> None:
         """Fail-closed DPO structure validation (prompt/chosen/rejected)."""
