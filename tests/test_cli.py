@@ -15,6 +15,17 @@ def _write_dataset(path: Path, n: int = 40):
     path.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
 
 
+def test_train_unsloth_fails_fast_without_dep(tmp_path: Path):
+    """--accelerator unsloth without unsloth installed -> exit 3 + install hint."""
+    runner.invoke(app, ["init", "proj", "meta-llama/Llama-3.1-8B", "--root", str(tmp_path)])
+    data = tmp_path / "proj" / "data.jsonl"
+    _write_dataset(data)
+    result = runner.invoke(app, ["train", str(data), "--root", str(tmp_path / "proj"),
+                                 "--accelerator", "unsloth"])
+    assert result.exit_code == 3, result.output
+    assert "tinct[unsloth]" in result.output
+
+
 def test_init(tmp_path: Path):
     result = runner.invoke(app, ["init", "proj", "meta-llama/Llama-3.1-8B", "--root", str(tmp_path)])
     assert result.exit_code == 0, result.output

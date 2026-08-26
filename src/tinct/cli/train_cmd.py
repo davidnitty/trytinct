@@ -154,6 +154,17 @@ def run_train(project: Project, dataset: Path, run_name: str | None,
         console.print("[yellow]Unsloth is not yet wired into DPO; falling back to 'none'.[/]")
         accelerator = "none"
 
+    # Fail-closed 0c: verify unsloth is importable BEFORE doing any expensive
+    # work (model download/chunking). Fails fast with an actionable hint.
+    if accelerator == "unsloth":
+        try:
+            import unsloth  # noqa: F401
+        except ImportError:
+            console.print("[bold red]Unsloth is required for --accelerator unsloth "
+                          "but is not installed.[/]")
+            console.print("  Install it with: pip install " + escape("'tinct[unsloth]'"))
+            return 3
+
     # Fail-closed 1: unsupported model family (security gate).
     if model_override:
         project.config.train.model = model_override
