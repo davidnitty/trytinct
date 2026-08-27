@@ -1,6 +1,6 @@
 # tinct Roadmap
 
-Current version: **v0.4.0**
+Current version: **v0.5.0**
 Last updated: 2026-08
 
 ---
@@ -31,21 +31,24 @@ Last updated: 2026-08
 - Model-family-aware Data Doctor (`tinct validate --model <id>`)
 
 ### v0.4.0 — Safety Gates ✅
-- Canary leakage detection (injection during SFT + eval gate, >50% → FAIL)
+- Canary leakage detection (injection + eval gate, >50% → FAIL)
 - Refusal regression testing (20 safety prompts, >20% drop → FAIL)
 - `tinct eval --safety` command → `safety_gates.json`
 - Safety gates fold into the signed evidence manifest
 - Ship blocks on safety failures
 
+### v0.5.0 — Toxicity Gate ✅
+- Two-tier toxicity scoring: keyword heuristic (dependency-free) +
+  optional Detoxify model (`tinct[toxicity]`)
+- Base vs adapter comparison on 10 neutral prompts
+- Ship gate: adapter toxicity >2x baseline → FAIL
+- Aggregate gate verdict (`safety_gates.result`) across all three gates
+
 ---
 
 ## In Progress
 
-### v0.5.0 — Toxicity Gate 🚧
-- Toxicity classifier integration (Detoxify or lightweight alternative)
-- Base vs adapter toxicity comparison on neutral prompts
-- Ship gate: adapter toxicity >2x baseline → DON'T SHIP
-- Evidence integration: `toxicity` field in `safety_gates.json`
+(nothing — next arc: frontend dashboard or v1.0 hardening)
 
 ---
 

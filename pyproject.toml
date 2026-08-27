@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tinct"
-version = "0.4.0"
+version = "0.5.0"
 description = "CLI-first post-training stack for LLMs — validate, train, eval, and ship with cryptographic evidence."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -49,6 +49,10 @@ eval = [
 unsloth = [
     "unsloth",
 ]
+# Toxicity scoring (Gate 3 of the behavioral certification).
+toxicity = [
+    "detoxify>=0.5.0",
+]
 full = [
     "tinct[train]",
     "tinct[eval]",
@@ -57,6 +61,7 @@ all = [
     "tinct[train]",
     "tinct[eval]",
     "tinct[unsloth]",
+    "tinct[toxicity]",
 ]
 dev = [
     "pytest>=8.0",

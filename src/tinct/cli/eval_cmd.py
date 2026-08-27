@@ -87,9 +87,9 @@ def run_eval(project, run_name: str | None, safety: bool = False) -> int:
         return 2
 
     # 3. Behavioral certification gates (optional --safety): canary leakage +
-    # refusal regression. Fail-closed — any FAIL blocks the checkpoint.
+    # refusal regression + toxicity. Fail-closed — any FAIL blocks the run.
     if safety:
-        from tinct.safety.gates import run_safety_gates
+        from tinct.safety.gates import run_safety_gates_for_run
 
         canaries_path = run_dir / "canaries.json"
         if not canaries_path.is_file():
@@ -98,7 +98,7 @@ def run_eval(project, run_name: str | None, safety: bool = False) -> int:
         else:
             canaries = json.loads(canaries_path.read_text(encoding="utf-8"))
             try:
-                safety_gates = run_safety_gates(
+                safety_gates = run_safety_gates_for_run(
                     project.config.train.model, adapter_dir, canaries
                 )
             except MissingDependencyError as exc:
