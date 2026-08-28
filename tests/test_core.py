@@ -307,6 +307,42 @@ def test_validate_mistral_chat_template_missing_eos():
     assert any("</s>" in e for e in errors)
 
 
+def test_validate_mistral_chat_template_empty_text():
+    assert validate_mistral_chat_template("") == ["Text field is empty."]
+    assert validate_mistral_chat_template("   ") == ["Text field is empty."]
+
+
+def test_validate_mistral_chat_template_ordering():
+    # [/INST] appearing before [INST] is structurally wrong.
+    text = "</s>[/INST] hello there [INST] hi"
+    errors = validate_mistral_chat_template(text)
+    assert any("[/INST] appears before" in e for e in errors)
+
+
+def test_validate_mistral_chat_template_empty_user_turn():
+    text = "<s>[INST]    [/INST] The answer is 4.</s>"
+    errors = validate_mistral_chat_template(text)
+    assert any("Empty user turn at position 1" in e for e in errors)
+
+
+def test_validate_mistral_chat_template_empty_assistant_turn():
+    text = "<s>[INST] What is 2+2? [/INST]   </s>"
+    errors = validate_mistral_chat_template(text)
+    assert any("Empty assistant turn at position 1" in e for e in errors)
+
+
+def test_validate_mistral_chat_template_multiturn_valid():
+    text = ("<s>[INST] first question [/INST] first answer</s>"
+            "[INST] second question [/INST] second answer</s>")
+    assert validate_mistral_chat_template(text) == []
+
+
+def test_validate_mistral_chat_template_trailing_whitespace_eos():
+    # Trailing whitespace after the EOS token is tolerated.
+    text = "<s>[INST] hi [/INST] hello</s>   \n"
+    assert validate_mistral_chat_template(text) == []
+
+
 def test_validate_chat_template_dispatches_mistral():
     assert validate_chat_template(MISTRAL_GOOD, "mistral") == []
     errors = validate_chat_template("no tokens", "mistral")

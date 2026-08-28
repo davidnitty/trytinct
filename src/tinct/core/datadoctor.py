@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import statistics
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -167,42 +168,86 @@ def validate_mistral_chat_template(text: str) -> list[str]:
 
         <s>[INST] user message [/INST] assistant message</s>
 
+    Multi-turn::
+
+        <s>[INST] first question [/INST] first answer</s>[INST] second
+        question [/INST] second answer</s>
+
     Returns a list of human-readable errors (empty when valid).
     """
     errors: list[str] = []
 
+    if not text or not text.strip():
+        errors.append("Text field is empty.")
+        return errors
+
+    # Check for required instruction tokens.
     if MISTRAL_INST_START not in text:
         errors.append(
-            f"Missing {MISTRAL_INST_START} token. Mistral models require this "
-            "to mark instructions."
+            f"Missing {MISTRAL_INST_START} token. "
+            f"Mistral models require [INST] to mark the start of user instructions."
         )
     if MISTRAL_INST_END not in text:
         errors.append(
-            f"Missing {MISTRAL_INST_END} token. Mistral models require this "
-            "to mark instruction endings."
+            f"Missing {MISTRAL_INST_END} token. "
+            f"Mistral models require [/INST] to mark the end of user instructions."
         )
 
-    # If the boundary tokens are missing there is no point checking structure.
+    # If instruction tokens are missing entirely, skip structural checks.
     if errors:
         return errors
 
+    # Check token balance: every [INST] must have a matching [/INST].
     inst_start_count = text.count(MISTRAL_INST_START)
     inst_end_count = text.count(MISTRAL_INST_END)
     if inst_start_count != inst_end_count:
         errors.append(
-            f"Unbalanced tokens: {inst_start_count} {MISTRAL_INST_START} vs "
-            f"{inst_end_count} {MISTRAL_INST_END}. Every instruction must be "
-            "properly closed."
+            f"Unbalanced instruction tokens: {inst_start_count} {MISTRAL_INST_START} "
+            f"vs {inst_end_count} {MISTRAL_INST_END}. "
+            f"Every [INST] must have a matching [/INST]."
         )
 
+    # Check for BOS token at start.
     if not text.startswith(MISTRAL_BOS):
         errors.append(
-            f"Missing {MISTRAL_BOS} (beginning of sequence) at start of text."
+            f"Missing {MISTRAL_BOS} at start of text. "
+            f"Mistral sequences must begin with the BOS token."
         )
-    if not text.endswith(MISTRAL_EOS):
+
+    # Check for EOS token at end (trailing whitespace tolerated).
+    if not text.rstrip().endswith(MISTRAL_EOS):
         errors.append(
-            f"Missing {MISTRAL_EOS} (end of sequence) at end of text."
+            f"Missing {MISTRAL_EOS} at end of text. "
+            f"Mistral sequences must end with the EOS token."
         )
+
+    # Check ordering: [INST] must come before its [/INST].
+    first_start = text.find(MISTRAL_INST_START)
+    first_end = text.find(MISTRAL_INST_END)
+    if first_end < first_start:
+        errors.append(
+            f"[/INST] appears before [INST]. "
+            f"User instruction must open with [INST] before closing with [/INST]."
+        )
+
+    # Every [INST]...[/INST] pair must contain a non-empty user turn.
+    user_turns = re.findall(r"\[INST\](.*?)\[/INST\]", text, re.DOTALL)
+    for i, turn in enumerate(user_turns):
+        if not turn.strip():
+            errors.append(
+                f"Empty user turn at position {i + 1}. "
+                f"Content between [INST] and [/INST] must not be blank."
+            )
+
+    # Every [/INST] must be followed by a non-empty assistant turn.
+    assistant_turns = re.findall(r"\[/INST\](.*?)(?:</s>|$)", text, re.DOTALL)
+    for i, turn in enumerate(assistant_turns):
+        if not turn.strip():
+            errors.append(
+                f"Empty assistant turn at position {i + 1}. "
+                f"Assistant response after [/INST] must not be blank."
+            )
+
     return errors
 
 
