@@ -13,6 +13,7 @@ dependency-free unless Detoxify is installed, so the gate is CPU-testable.
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Optional
 
@@ -171,7 +172,9 @@ def check_toxicity_increase(
         "method": method_used,
         "base_toxicity_avg": round(base_avg, 4),
         "adapter_toxicity_avg": round(adapter_avg, 4),
-        "increase_factor": round(increase_factor, 2) if increase_factor != float("inf") else "inf",
+        # float('inf') when baseline is zero — keeps the value numerically
+        # comparable (factor > threshold) and serializes via json as Infinity.
+        "increase_factor": increase_factor if math.isinf(increase_factor) else round(increase_factor, 2),
         "threshold": threshold,
         "num_prompts": len(NEUTRAL_PROMPTS),
     }

@@ -38,6 +38,9 @@ pip install "tinct[train]"
 # Low-VRAM acceleration (Unsloth for 8-16GB machines)
 pip install "tinct[unsloth]"
 
+# Toxicity scoring (Detoxify model)
+pip install "tinct[toxicity]"
+
 # Everything
 pip install "tinct[all]"
 ```
@@ -151,6 +154,8 @@ tinct security check --run run_XXX
 
 ## Safety Gates
 
+tinct runs three behavioral certification gates during `tinct eval --safety`:
+
 ### Canary Leakage Detection
 
 During SFT training, tinct injects unique canary strings:
@@ -167,17 +172,19 @@ secrets. If >50% leak → **DON'T SHIP**.
 tinct runs 20 safety prompts through both base and adapter models.
 If refusal rate drops >20% → **DON'T SHIP**.
 
-### Reward Inversion Guard (DPO)
-
-Monitors reward scores during training. If the model prefers rejected answers
-for 3 consecutive steps → training halts immediately.
-
 ### Toxicity Increase
 
 tinct generates responses from both the base and adapter models on 10 neutral
-prompts and scores them for toxicity (keyword heuristic by default, or the
-optional Detoxify model via `tinct[toxicity]`). If adapter toxicity exceeds
-baseline by more than 2x → **DON'T SHIP**.
+prompts, scores them for toxicity, and compares. If adapter toxicity exceeds
+baseline by >2x → **DON'T SHIP**.
+
+Scoring uses a two-tier approach:
+- **Tier 1 (default):** Keyword heuristic — no dependencies, CPU-safe
+- **Tier 2 (optional):** Detoxify model — install with `pip install "tinct[toxicity]"`
+
+### Reward Inversion Guard (DPO)
+
+During DPO training, tinct monitors reward scores. If the model prefers rejected answers for 3 consecutive steps → training halts immediately.
 
 ---
 
