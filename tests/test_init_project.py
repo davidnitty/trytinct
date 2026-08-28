@@ -24,7 +24,7 @@ def test_init_creates_tree_and_config(tmp_path: Path):
     # Default project.yaml with the init policy keys.
     raw = yaml.safe_load(paths.project_config.read_text(encoding="utf-8"))
     assert raw["project_name"] == "p"
-    assert raw["model_families_allowed"] == ["llama"]
+    assert raw["model_families_allowed"] == ["llama", "mistral"]
     assert raw["default_lora_rank"] == 16
     assert raw["max_loss_threshold"] == 10.0
     assert raw["fail_closed"] is True

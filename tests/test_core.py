@@ -10,7 +10,12 @@ from tinct.core.datadoctor import (
     DataDoctor,
     DatasetLoadError,
     check_dataset_format,
+    family_for_model,
     validate_dpo_row,
+    validate_llama_chat_template,
+    validate_mistral_chat_template,
+    validate_chat_template,
+    validate_qwen_chat_template,
 )
 from tinct.core.project import Project, UnsupportedModelFamily, detect_model_family
 
@@ -265,3 +270,80 @@ def test_qwen_template_passes_qwen_data(project, tmp_path: Path):
                         model_family="qwen")
     report, _ = doctor.run(data)
     assert report.passed
+
+
+# -- Mistral chat template validation ----------------------------------------
+
+MISTRAL_GOOD = (
+    "<s>[INST] What is 2+2? [/INST]2+2 equals 4.</s>"
+)
+
+
+def test_validate_mistral_chat_template_valid():
+    assert validate_mistral_chat_template(MISTRAL_GOOD) == []
+
+
+def test_validate_mistral_chat_template_missing_tokens():
+    errors = validate_mistral_chat_template("What is 2+2?")
+    assert any("[INST]" in e for e in errors)
+    assert any("[/INST]" in e for e in errors)
+
+
+def test_validate_mistral_chat_template_unbalanced():
+    # Both tokens present, but two [/INST] closers for one opener.
+    errors = validate_mistral_chat_template("<s>[INST] a [/INST] b [/INST]</s>")
+    assert any("Unbalanced" in e for e in errors)
+
+
+def test_validate_mistral_chat_template_missing_bos():
+    text = "[INST] hi [/INST] hello</s>"
+    errors = validate_mistral_chat_template(text)
+    assert any("<s>" in e for e in errors)
+
+
+def test_validate_mistral_chat_template_missing_eos():
+    text = "<s>[INST] hi [/INST] hello"
+    errors = validate_mistral_chat_template(text)
+    assert any("</s>" in e for e in errors)
+
+
+def test_validate_chat_template_dispatches_mistral():
+    assert validate_chat_template(MISTRAL_GOOD, "mistral") == []
+    errors = validate_chat_template("no tokens", "mistral")
+    assert errors
+
+
+def test_family_detection_mistral_and_mixtral():
+    assert family_for_model("mistralai/Mistral-7B-Instruct-v0.2") == "mistral"
+    # Mixtral is Mistral's MoE line — maps to the mistral family.
+    assert family_for_model("mistralai/Mixtral-8x7B-Instruct-v0.1") == "mistral"
+
+
+def test_mistral_allowed_by_default():
+    from tinct.core.model_gate import check_model_family
+    assert check_model_family("mistralai/Mistral-7B-Instruct-v0.2") == "mistral"
+
+
+def test_mistral_template_passes_doctor(project, tmp_path: Path):
+    rows = [{"text": MISTRAL_GOOD} for _ in range(20)]
+    data = tmp_path / "mistral.jsonl"
+    data.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+
+    doctor = DataDoctor(project.config.data, max_seq_len=2048, seed=42,
+                        model_family="mistral")
+    report, _ = doctor.run(data)
+    assert report.passed
+
+
+def test_llama_template_fails_as_mistral(project, tmp_path: Path):
+    """Llama-formatted data must fail when validated as Mistral."""
+    rows = [{"text": "<|begin_of_text|><|start_header_id|>user<|end_header_id|>"
+                     f"Q{i}<|eot_id|>"} for i in range(20)]
+    data = tmp_path / "llama.jsonl"
+    data.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+
+    doctor = DataDoctor(project.config.data, max_seq_len=2048, seed=42,
+                        model_family="mistral")
+    report, _ = doctor.run(data)
+    assert not report.passed
+    assert any(r.rule_id == "data.chat_template" for r in report.failed_errors)

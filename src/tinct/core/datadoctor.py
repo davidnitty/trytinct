@@ -71,6 +71,12 @@ QWEN_SYSTEM = "system"
 QWEN_USER = "user"
 QWEN_ASSISTANT = "assistant"
 
+# Mistral-specific tokens.
+MISTRAL_BOS = "<s>"
+MISTRAL_EOS = "</s>"
+MISTRAL_INST_START = "[INST]"
+MISTRAL_INST_END = "[/INST]"
+
 
 def validate_qwen_chat_template(text: str) -> list[str]:
     """Validate that ``text`` follows Qwen's strict chat-template format.
@@ -152,6 +158,52 @@ def family_for_model(model_name: str | None) -> str | None:
         return None
 
 
+def validate_mistral_chat_template(text: str) -> list[str]:
+    """Validate that ``text`` follows Mistral's chat-template format.
+
+    Mistral expects::
+
+        <s>[INST] user message [/INST] assistant message</s>
+
+    Returns a list of human-readable errors (empty when valid).
+    """
+    errors: list[str] = []
+
+    if MISTRAL_INST_START not in text:
+        errors.append(
+            f"Missing {MISTRAL_INST_START} token. Mistral models require this "
+            "to mark instructions."
+        )
+    if MISTRAL_INST_END not in text:
+        errors.append(
+            f"Missing {MISTRAL_INST_END} token. Mistral models require this "
+            "to mark instruction endings."
+        )
+
+    # If the boundary tokens are missing there is no point checking structure.
+    if errors:
+        return errors
+
+    inst_start_count = text.count(MISTRAL_INST_START)
+    inst_end_count = text.count(MISTRAL_INST_END)
+    if inst_start_count != inst_end_count:
+        errors.append(
+            f"Unbalanced tokens: {inst_start_count} {MISTRAL_INST_START} vs "
+            f"{inst_end_count} {MISTRAL_INST_END}. Every instruction must be "
+            "properly closed."
+        )
+
+    if not text.startswith(MISTRAL_BOS):
+        errors.append(
+            f"Missing {MISTRAL_BOS} (beginning of sequence) at start of text."
+        )
+    if not text.endswith(MISTRAL_EOS):
+        errors.append(
+            f"Missing {MISTRAL_EOS} (end of sequence) at end of text."
+        )
+    return errors
+
+
 def validate_chat_template(text: str, model_family: str) -> list[str]:
     """Validate a formatted chat string against the target model family.
 
@@ -162,6 +214,8 @@ def validate_chat_template(text: str, model_family: str) -> list[str]:
         return validate_qwen_chat_template(text)
     elif model_family == "llama":
         return validate_llama_chat_template(text)
+    elif model_family == "mistral":
+        return validate_mistral_chat_template(text)
     else:
         if not text or not text.strip():
             return ["Text field is empty."]

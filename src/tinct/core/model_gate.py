@@ -27,8 +27,8 @@ KNOWN_MODEL_FAMILIES: tuple[str, ...] = (
     "phi",
 )
 
-# Default whitelist for V0: Llama only.
-SUPPORTED_MODEL_FAMILIES: tuple[str, ...] = ("llama",)
+# Default whitelist: families with full training + validation support.
+SUPPORTED_MODEL_FAMILIES: tuple[str, ...] = ("llama", "mistral")
 
 
 class UnsupportedModelFamily(ValueError):
@@ -40,8 +40,11 @@ def detect_model_family(model: str) -> str:
 
     Matches a known family name appearing in the final path segment. An
     unrecognized architecture fails-closed (we cannot safely handle it).
+    Mixtral is Mistral's MoE line and maps to the ``mistral`` family.
     """
     name = model.rsplit("/", 1)[-1].lower()
+    if "mixtral" in name:  # Mixtral is Mistral's MoE — substring doesn't overlap.
+        return "mistral"
     for family in KNOWN_MODEL_FAMILIES:
         if family in name:
             return family

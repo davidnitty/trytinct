@@ -21,7 +21,7 @@ from tinct import __version__
 from tinct.core.project import Project
 from tinct.utils.logging import get_console, setup_logging
 
-from . import eval_cmd, init_cmd, ship_cmd, train_cmd, validate_cmd
+from . import certify_cmd, eval_cmd, init_cmd, ship_cmd, train_cmd, validate_cmd
 from .security_cmd import security_app
 
 app = typer.Typer(
@@ -150,6 +150,27 @@ def ship(
     """Produce the SHIP / DON'T-SHIP decision with signed evidence."""
     project = _open_project(root)
     _exit(ship_cmd.run_ship(project, run))
+
+
+# -- integration layer --------------------------------------------------------
+
+@app.command("certify")
+def certify(
+    adapter: Path = typer.Option(..., "--adapter",
+                                 help="Path to the trained LoRA adapter directory."),
+    base_model: str = typer.Option(..., "--base-model",
+                                   help="Base model id the adapter was trained on."),
+    root: Path = typer.Option(".", "--root", help="Project/state root (.tinct)."),
+    canaries: Path | None = typer.Option(
+        None, "--canaries", help="canaries.json for the leakage gate (optional)."
+    ),
+    skip_safety: bool = typer.Option(
+        False, "--skip-safety", help="Skip behavioral safety gates (canary/refusal/toxicity)."
+    ),
+) -> None:
+    """Certify an externally trained adapter: eval gates + signed evidence."""
+    _exit(certify_cmd.run_certify(adapter, base_model, root,
+                                  canaries_path=canaries, skip_safety=skip_safety))
 
 
 def main() -> None:

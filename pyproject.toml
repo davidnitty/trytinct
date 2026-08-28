@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tinct"
-version = "0.5.0"
+version = "1.0.0"
 description = "CLI-first post-training stack for LLMs — validate, train, eval, and ship with cryptographic evidence."
 readme = "README.md"
 requires-python = ">=3.10"

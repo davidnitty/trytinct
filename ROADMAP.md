@@ -1,6 +1,6 @@
 # tinct Roadmap
 
-Current version: **v0.5.0**
+Current version: **v1.0.0**
 Last updated: 2026-08
 
 ---
@@ -44,25 +44,27 @@ Last updated: 2026-08
 - Ship gate: adapter toxicity >2x baseline → FAIL
 - Aggregate gate verdict (`safety_gates.result`) across all three gates
 
+### v1.0.0 — Integration Layer + Mistral ✅
+- **`tinct certify`**: certify adapters from any training pipeline
+  (LLaMA-Factory, Unsloth, Axolotl) — eval gates + signed evidence,
+  standalone (no `tinct init` required), both verdicts signed
+- **Mistral / Mixtral support**: strict `[INST]`/`[/INST]` template
+  validation (balance + BOS/EOS); Mixtral maps to the mistral family
+- Mistral enabled by default in the model-family gate and project allowlist
+- LoRA adapter validation (fail-closed before model load)
+
 ---
 
 ## In Progress
 
-(nothing — next arc: frontend dashboard or v1.0 hardening)
-
----
-
-## Planned
-
-### v1.0.0 — Full Certification Stack
+### v1.1.0 — Hardening + Dashboard 🚧
 - **Frontend dashboard**: visualize evidence, safety gates, DPO metrics
-- **Mistral support**: template validation + accelerator integration
 - **Multi-GPU training**: DeepSpeed ZeRO-3 integration
 - **Model export**: GGUF / ONNX export with signed provenance
 - **CI integration**: `tinct` as a GitHub Action for automated certification
 - **Documentation site**: full API reference + tutorials
 
-### v1.1.0 — Advanced Safety
+### Later — Advanced Safety
 - **Prompt injection resistance**: eval gate for injection attacks
 - **PII leakage**: structured PII detection beyond canaries
 - **Bias amplification**: compare bias scores pre/post training

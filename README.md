@@ -130,7 +130,27 @@ tinct security check --run run_XXX
 | `tinct train` | Guarded training (SFT/DPO) |
 | `tinct eval` | Certification gates (smoke test, safety) |
 | `tinct ship` | Sign evidence, issue verdict |
+| `tinct certify --adapter DIR --base-model ID` | Certify an externally trained adapter |
 | `tinct security check [--run ID]` | Verify signed evidence |
+
+---
+
+## Integration Layer
+
+Trained with LLaMA-Factory, Unsloth, or Axolotl? tinct certifies adapters from
+any training pipeline:
+
+```bash
+tinct certify \
+  --adapter ./my_adapter \
+  --base-model mistralai/Mistral-7B-Instruct-v0.2 \
+  --canaries canaries.json   # optional, for the leakage gate
+```
+
+tinct loads your adapter onto its base model, runs the certification gates
+(generation smoke test + behavioral safety gates), signs the evidence bundle,
+and issues **SHIP** (exit 0) or **DON'T SHIP** (exit 2) with cryptographic
+proof. Works standalone — no `tinct init` required.
 
 ---
 
@@ -223,7 +243,7 @@ The final certification is stored separately as a signed manifest:
 |--------|--------|--------------|
 | Llama 3.x | ✅ Supported | Unsloth + HF |
 | Qwen 2.5 | ✅ Supported (validation) | Unsloth + HF* |
-| Mistral | 🚧 Planned | — |
+| Mistral / Mixtral | ✅ Supported | Unsloth + HF |
 | DeepSeek | 🚧 Planned | — |
 
 \* Qwen template validation is fully supported; accelerated Qwen training
