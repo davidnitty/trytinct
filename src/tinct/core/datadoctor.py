@@ -1,4 +1,6 @@
-"""Data Doctor — validates instruction datasets before training.
+"""Data Doctor — validates dataset structure, chat templates, and duplicates.
+
+Supports model families: Llama, Qwen, Mistral.
 
 Fail-closed: hard (error-severity) failures block training. Warnings and info
 are reported but do not block.

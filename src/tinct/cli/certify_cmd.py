@@ -16,7 +16,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from tinct.cli.render import print_decision
-from tinct.core.adapter_validator import validate_adapter_structure
+from tinct.core.adapter_validator import (
+    validate_adapter_compatible,
+    validate_adapter_structure,
+)
 from tinct.core.model_gate import check_model_family
 from tinct.engine.deps import MissingDependencyError
 from tinct.security.evidence import EvidenceReport, hash_directory, hash_path
@@ -79,6 +82,17 @@ def run_certify(
         training_tool = "external"
     console.print(f"  adapter type: {validation['adapter_type']}")
     console.print(f"  training tool: {training_tool}")
+
+    # 2b. The adapter must be compatible with the base model — a LoRA trained
+    #     on a different architecture would silently invalidate every gate
+    #     result below.
+    compat = validate_adapter_compatible(adapter, base_model)
+    if not compat["compatible"]:
+        for err in compat["errors"]:
+            console.print(f"[bold red]{err}[/]")
+        return 1
+    if compat.get("adapter_base_model"):
+        console.print(f"  trained on:  {compat['adapter_base_model']}")
 
     # 3. Standalone state: ensure the .tinct tree and a signing key exist.
     paths = TinctPaths(Path(root).resolve())

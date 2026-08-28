@@ -3,7 +3,12 @@
 import json
 from pathlib import Path
 
-from tinct.core.adapter_validator import validate_adapter_structure
+import pytest
+
+from tinct.core.adapter_validator import (
+    validate_adapter_compatible,
+    validate_adapter_structure,
+)
 
 
 def _write_adapter(path: Path, config: dict, weights: bool = True) -> None:
@@ -100,3 +105,58 @@ def test_unparseable_adapter_config(tmp_path: Path):
     result = validate_adapter_structure(tmp_path)
     assert result["valid"] is False
     assert any("Failed to parse" in e for e in result["errors"])
+
+
+# -- adapter / base-model compatibility ---------------------------------------
+
+def test_compatible_exact_same_base(tmp_path: Path):
+    _write_adapter(tmp_path, {
+        "peft_type": "LORA",
+        "base_model_name_or_path": "meta-llama/Llama-3.1-8B",
+    })
+    result = validate_adapter_compatible(tmp_path, "meta-llama/Llama-3.1-8B")
+    assert result["compatible"] is True
+    assert result["adapter_base_model"] == "meta-llama/Llama-3.1-8B"
+
+
+def test_compatible_short_name_matches_full_id(tmp_path: Path):
+    _write_adapter(tmp_path, {
+        "peft_type": "LORA",
+        "base_model_name_or_path": "meta-llama/Llama-3.1-8B",
+    })
+    result = validate_adapter_compatible(tmp_path, "llama-3.1-8b")
+    assert result["compatible"] is True
+
+
+def test_incompatible_base_model_rejected(tmp_path: Path):
+    _write_adapter(tmp_path, {
+        "peft_type": "LORA",
+        "base_model_name_or_path": "meta-llama/Llama-3.1-8B",
+    })
+    result = validate_adapter_compatible(tmp_path, "Qwen/Qwen2.5-7B-Instruct")
+    assert result["compatible"] is False
+    assert any("may be incompatible" in e for e in result["errors"])
+    assert result["adapter_base_model"] == "meta-llama/Llama-3.1-8B"
+
+
+def test_no_base_model_in_config_allows_check(tmp_path: Path):
+    _write_adapter(tmp_path, {"peft_type": "LORA"})
+    result = validate_adapter_compatible(tmp_path, "meta-llama/Llama-3.1-8B")
+    assert result["compatible"] is True
+    assert result["adapter_base_model"] == ""
+
+
+def test_incompatible_invalid_structure(tmp_path: Path):
+    # No adapter config -> structure fails -> compatibility fails with the
+    # structure errors surfaced.
+    (tmp_path / "adapter_model.safetensors").write_bytes(b"x")
+    result = validate_adapter_compatible(tmp_path, "meta-llama/Llama-3.1-8B")
+    assert result["compatible"] is False
+    assert any("adapter_config.json" in e for e in result["errors"])
+
+
+def test_structure_reports_weight_formats(tmp_path: Path):
+    _write_adapter(tmp_path, {"peft_type": "LORA"})
+    result = validate_adapter_structure(tmp_path)
+    assert result["has_safetensors"] is True
+    assert result["has_bin"] is False

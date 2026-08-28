@@ -5,6 +5,9 @@ Supports:
 - Unsloth (PEFT LoRA)
 - Axolotl (PEFT LoRA)
 - Any tool that outputs standard PEFT adapters
+
+Also verifies adapter/base-model compatibility (:func:`validate_adapter_compatible`)
+— a LoRA trained on model X must not be certified on top of model Y.
 """
 
 from __future__ import annotations
@@ -15,17 +18,23 @@ from typing import Any, Optional
 
 
 def _result(valid: bool, errors: list[str],
-            adapter_type: Optional[str], training_tool: Optional[str]) -> dict:
+            adapter_type: Optional[str], training_tool: Optional[str],
+            has_safetensors: bool = False, has_bin: bool = False) -> dict:
     return {
         "valid": valid,
         "errors": errors,
         "adapter_type": adapter_type,
         "training_tool": training_tool,
+        "has_safetensors": has_safetensors,
+        "has_bin": has_bin,
     }
 
 
 def validate_adapter_structure(adapter_path: Path) -> dict:
     """Validate that an adapter directory has the expected PEFT structure.
+
+    Args:
+        adapter_path: Path to the adapter directory.
 
     Returns:
         Dict with validation results::
@@ -33,9 +42,11 @@ def validate_adapter_structure(adapter_path: Path) -> dict:
             {
                 "valid": bool,
                 "errors": list[str],
-                "adapter_type": str,     # "peft-lora", "peft-qlora", ...
-                "training_tool": str,    # "llama-factory", "unsloth",
-                                         # "axolotl", "unknown"
+                "adapter_type": str,      # "peft-lora", "peft-qlora", ...
+                "training_tool": str,     # "llama-factory", "unsloth",
+                                          # "axolotl", "unknown"
+                "has_safetensors": bool,
+                "has_bin": bool,
             }
     """
     if not adapter_path.exists():
@@ -90,4 +101,94 @@ def validate_adapter_structure(adapter_path: Path) -> dict:
     elif "axolotl" in config_blob:
         training_tool = "axolotl"
 
-    return _result(len(errors) == 0, errors, adapter_type, training_tool)
+    return _result(len(errors) == 0, errors, adapter_type, training_tool,
+                   has_safetensors=has_safetensors, has_bin=has_bin)
+
+
+def validate_adapter_compatible(adapter_path: Path, base_model: str) -> dict:
+    """Validate that an adapter is compatible with the base model it will be
+    loaded onto.
+
+    A LoRA trained on model X, attached to model Y, produces silently invalid
+    results — every downstream gate would certify garbage. The adapter's
+    ``base_model_name_or_path`` is compared against the requested base model
+    with a lenient token-overlap heuristic (org prefixes and dash/underscore
+    formatting differ across tools).
+
+    Returns:
+        ``{"compatible": bool, "errors": [...], "structure": {...},
+        "adapter_base_model": str}``
+    """
+    structure = validate_adapter_structure(adapter_path)
+
+    if not structure["valid"]:
+        return {
+            "compatible": False,
+            "errors": list(structure["errors"]),
+            "structure": structure,
+            "adapter_base_model": "",
+        }
+
+    adapter_config_path = adapter_path / "adapter_config.json"
+    try:
+        adapter_config: dict[str, Any] = json.loads(
+            adapter_config_path.read_text(encoding="utf-8")
+        )
+    except Exception as exc:
+        return {
+            "compatible": False,
+            "errors": [f"Failed to parse adapter_config.json: {exc}"],
+            "structure": structure,
+            "adapter_base_model": "",
+        }
+
+    adapter_base_model = str(adapter_config.get("base_model_name_or_path", ""))
+
+    # If the adapter doesn't record its base model, we can't check — allow it,
+    # but surface what (little) we know.
+    if not adapter_base_model:
+        return {
+            "compatible": True,
+            "errors": [],
+            "structure": structure,
+            "adapter_base_model": "",
+        }
+
+    adapter_base_lower = adapter_base_model.lower()
+    base_model_lower = base_model.lower()
+
+    # Exact or prefix containment: the tool may have recorded the full HF id
+    # while the user passed a short name (or vice versa).
+    if adapter_base_lower in base_model_lower or base_model_lower in adapter_base_lower:
+        return {
+            "compatible": True,
+            "errors": [],
+            "structure": structure,
+            "adapter_base_model": adapter_base_model,
+        }
+
+    # Lenient token-overlap heuristic: compare significant parts after
+    # normalizing separators. Fewer than 2 shared tokens means these are
+    # probably different architectures.
+    def _parts(name: str) -> set[str]:
+        cleaned = name.replace("-", " ").replace("_", " ").replace("/", " ")
+        return {p for p in cleaned.lower().split() if p}
+
+    common_parts = _parts(adapter_base_model) & _parts(base_model)
+    if len(common_parts) < 2:
+        return {
+            "compatible": False,
+            "errors": [
+                f"Adapter was trained on '{adapter_base_model}' but base model "
+                f"is '{base_model}'. These may be incompatible."
+            ],
+            "structure": structure,
+            "adapter_base_model": adapter_base_model,
+        }
+
+    return {
+        "compatible": True,
+        "errors": [],
+        "structure": structure,
+        "adapter_base_model": adapter_base_model,
+    }

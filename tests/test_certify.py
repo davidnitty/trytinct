@@ -95,3 +95,17 @@ def test_certify_reports_training_tool(tmp_path):
     # the environment (GPU/token/gated model), so only the tool line is
     # asserted here.
     assert "training tool: unsloth" in result.output
+
+def test_certify_blocks_incompatible_base_model(tmp_path):
+    """An adapter trained on a different base model is rejected (exit 1)
+    before any model load — a mismatched LoRA would invalidate all gates."""
+    adapter = _make_adapter(tmp_path / "adapter", {
+        "peft_type": "LORA",
+        "base_model_name_or_path": "meta-llama/Llama-3.1-8B",
+    })
+    result = runner.invoke(app, ["certify",
+                                 "--adapter", str(adapter),
+                                 "--base-model", "mistralai/Mistral-7B-Instruct-v0.2",
+                                 "--root", str(tmp_path)])
+    assert result.exit_code == 1, result.output
+    assert "may be incompatible" in result.output
