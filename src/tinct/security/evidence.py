@@ -82,6 +82,10 @@ class EvidenceReport:
     metrics: Dict[str, Any] = field(default_factory=dict)
     config: Dict[str, Any] = field(default_factory=dict)
     safety_gates: Dict[str, Any] = field(default_factory=dict)
+    # Integration-layer provenance: which tool trained the adapter, and
+    # whether tinct itself executed the training run.
+    training_tool: str = "tinct"
+    training_executed: bool = True
     signature: Optional[Dict[str, Any]] = None
 
     # -- signing ------------------------------------------------------------
@@ -100,6 +104,8 @@ class EvidenceReport:
             "metrics": self.metrics,
             "config": self.config,
             "safety_gates": self.safety_gates,
+            "training_tool": self.training_tool,
+            "training_executed": self.training_executed,
         }
         return json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
@@ -136,6 +142,8 @@ class EvidenceReport:
             "metrics": self.metrics,
             "config": self.config,
             "safety_gates": self.safety_gates,
+            "training_tool": self.training_tool,
+            "training_executed": self.training_executed,
             "signature": self.signature,
         }
 
@@ -153,6 +161,8 @@ class EvidenceReport:
             metrics=raw.get("metrics", {}),
             config=raw.get("config", {}),
             safety_gates=raw.get("safety_gates", {}),
+            training_tool=raw.get("training_tool", "tinct"),
+            training_executed=raw.get("training_executed", True),
             signature=raw.get("signature"),
         )
 

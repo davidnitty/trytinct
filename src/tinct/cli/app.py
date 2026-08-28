@@ -164,13 +164,20 @@ def certify(
     canaries: Path | None = typer.Option(
         None, "--canaries", help="canaries.json for the leakage gate (optional)."
     ),
+    dataset: Path | None = typer.Option(
+        None, "--dataset", help="Training dataset (optional; hashed into evidence)."
+    ),
+    run_id: str | None = typer.Option(
+        None, "--run-id", help="Custom certification ID (auto-generated if omitted)."
+    ),
     skip_safety: bool = typer.Option(
         False, "--skip-safety", help="Skip behavioral safety gates (canary/refusal/toxicity)."
     ),
 ) -> None:
     """Certify an externally trained adapter: eval gates + signed evidence."""
-    _exit(certify_cmd.run_certify(adapter, base_model, root,
-                                  canaries_path=canaries, skip_safety=skip_safety))
+    _exit(certify_cmd.run_certify(adapter, base_model, root, canaries_path=canaries,
+                                  dataset_path=dataset, run_id=run_id,
+                                  skip_safety=skip_safety))
 
 
 def main() -> None:

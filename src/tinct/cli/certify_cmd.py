@@ -5,6 +5,8 @@ itself); certification happens here. ``tinct certify`` loads an externally
 trained LoRA adapter onto its base model, runs the eval gates (generation
 smoke test + behavioral safety gates), signs the evidence bundle, and issues a
 SHIP / DON'T-SHIP verdict with cryptographic proof.
+
+Does NOT run training — assumes the adapter was trained externally.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from tinct.cli.render import print_decision
+from tinct.core.adapter_validator import validate_adapter_structure
 from tinct.core.model_gate import check_model_family
 from tinct.engine.deps import MissingDependencyError
 from tinct.security.evidence import EvidenceReport, hash_directory, hash_path
@@ -41,28 +44,20 @@ def _ensure_signing_key(paths: TinctPaths, key_name: str) -> SigningKey:
         return key
 
 
-def _validate_adapter_dir(adapter: Path) -> Optional[str]:
-    """Fail-closed check that ``adapter`` looks like a LoRA adapter directory."""
-    if not adapter.is_dir():
-        return f"Adapter not found: {adapter}"
-    if not (adapter / "adapter_config.json").is_file() and \
-            not any(adapter.glob("*.safetensors")):
-        return (
-            "Directory does not look like a LoRA adapter (expected "
-            "adapter_config.json or *.safetensors)."
-        )
-    return None
-
-
 def run_certify(
     adapter: Path,
     base_model: str,
     root: Path = Path("."),
     canaries_path: Path | None = None,
+    dataset_path: Path | None = None,
+    run_id: str | None = None,
     skip_safety: bool = False,
 ) -> int:
-    """Certify an externally trained adapter. Returns 0 (SHIP) or 2 (DON'T SHIP);
-    1 for usage errors, 3 for missing dependencies."""
+    """Certify an externally trained adapter.
+
+    Returns 0 (SHIP) or 2 (DON'T SHIP); 1 for usage errors, 3 for missing
+    dependencies. Both verdicts produce signed evidence.
+    """
     console = get_console()
     adapter = Path(adapter)
 
@@ -73,15 +68,25 @@ def run_certify(
         console.print(f"[bold red]{exc}[/]")
         return 2
 
-    # 2. The adapter must be a real LoRA adapter directory.
-    error = _validate_adapter_dir(adapter)
-    if error:
-        console.print(f"[bold red]{error}[/]")
+    # 2. The adapter must be a real PEFT adapter from a known tool shape.
+    validation = validate_adapter_structure(adapter)
+    if not validation["valid"]:
+        for err in validation["errors"]:
+            console.print(f"[bold red]{err}[/]")
         return 1
+    training_tool = validation["training_tool"]
+    if training_tool == "unknown":
+        training_tool = "external"
+    console.print(f"  adapter type: {validation['adapter_type']}")
+    console.print(f"  training tool: {training_tool}")
 
     # 3. Standalone state: ensure the .tinct tree and a signing key exist.
     paths = TinctPaths(Path(root).resolve())
     paths.ensure_dirs()
+
+    cert_id = run_id or _default_cert_id()
+    work_dir = paths.runs_dir / cert_id
+    work_dir.mkdir(parents=True, exist_ok=True)
 
     canaries: list[dict] = []
     if canaries_path is not None:
@@ -91,14 +96,25 @@ def run_certify(
             return 1
         canaries = json.loads(canaries_file.read_text(encoding="utf-8"))
 
-    cert_id = _default_cert_id()
-    work_dir = paths.runs_dir / cert_id
-    work_dir.mkdir(parents=True, exist_ok=True)
     console.print(f"[bold]Certification[/] {cert_id}")
     console.print(f"  base model: {base_model} ({family})")
     console.print(f"  adapter:    {adapter}")
 
-    # 4. Eval gates. Any gate failure still produces signed evidence — the
+    # 4. Persist adapter provenance (hashed into the evidence bundle).
+    adapter_metadata = {
+        "adapter_path": str(adapter.resolve()),
+        "base_model": base_model,
+        "adapter_type": validation["adapter_type"],
+        "training_tool": training_tool,
+        "adapter_config": json.loads(
+            (adapter / "adapter_config.json").read_text(encoding="utf-8")
+        ),
+        "certified_at": datetime.now(timezone.utc).isoformat(),
+    }
+    metadata_path = work_dir / "adapter_metadata.json"
+    metadata_path.write_text(json.dumps(adapter_metadata, indent=2), encoding="utf-8")
+
+    # 5. Eval gates. Any gate failure still produces signed evidence — the
     #    DON'T-SHIP verdict carries the cryptographic proof of why.
     decision = "SHIP"
     try:
@@ -111,6 +127,12 @@ def run_certify(
     except MissingDependencyError as exc:
         console.print(f"[bold red]Cannot certify:[/] {exc}")
         return 3
+    except Exception as exc:
+        # Model-load failures (gated repo, missing weights, no GPU) surface
+        # here as a clean error rather than a traceback.
+        console.print(f"[bold red]Certification failed while loading the model:[/] {exc}")
+        console.print("  Gated model? Authenticate with `huggingface-cli login`.")
+        return 1
 
     safety_gates: dict = {}
     if not skip_safety:
@@ -130,17 +152,23 @@ def run_certify(
         except MissingDependencyError as exc:
             console.print(f"[bold red]Cannot run safety gates:[/] {exc}")
             return 3
+        except Exception as exc:
+            console.print(f"[bold red]Safety gates failed while loading the model:[/] {exc}")
+            return 1
 
-    # 5. Build and sign the evidence bundle — both verdicts are signed, so a
+    # 6. Build and sign the evidence bundle — both verdicts are signed, so a
     #    DON'T-SHIP carries cryptographic proof of why.
     adapter_hash = hash_directory(adapter)
     artifacts = {
         "adapter": hash_directory(adapter),
         "adapter_sha256": {"path": str(adapter), "sha256": adapter_hash},
+        "adapter_metadata.json": hash_path(metadata_path),
         "eval_report.json": hash_path(work_dir / "eval_report.json"),
     }
     if canaries_path is not None:
         artifacts["canaries.json"] = hash_path(Path(canaries_path))
+    if dataset_path is not None and Path(dataset_path).is_file():
+        artifacts["dataset"] = hash_path(Path(dataset_path))
     if not skip_safety:
         artifacts["safety_gates.json"] = hash_path(work_dir / "safety_gates.json")
 
@@ -150,8 +178,12 @@ def run_certify(
         family=family,
         decision=decision,
         artifacts=artifacts,
-        eval_report=json.loads((work_dir / "eval_report.json").read_text(encoding="utf-8")),
+        eval_report=json.loads(
+            (work_dir / "eval_report.json").read_text(encoding="utf-8")
+        ),
         safety_gates=safety_gates,
+        training_tool=training_tool,
+        training_executed=False,  # certify never trains — adapter came from outside
         config={
             "base_model": base_model,
             "adapter": str(adapter),
@@ -168,7 +200,7 @@ def run_certify(
     evidence_path = report.write(paths.evidence_dir, cert_id)
     console.print("[green]Evidence signed and signature verified.[/]")
 
-    # 6. Verdict.
+    # 7. Verdict.
     print_decision(console, decision)
     console.print(f"[bold green]Evidence signed and saved:[/] {evidence_path}")
     console.print(f"  adapter_sha256: {adapter_hash}")

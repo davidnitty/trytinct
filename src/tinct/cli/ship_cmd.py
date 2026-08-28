@@ -123,6 +123,8 @@ def run_ship(project: Project, run_name: str | None) -> int:
         metrics={"training_method": training_method, "dpo_metrics": dpo_metrics},
         config=project.config.model_dump(mode="json"),
         safety_gates=safety_gates,
+        training_tool="tinct",
+        training_executed=True,
     )
 
     # Cryptographic evidence is required to ship (secure by default).

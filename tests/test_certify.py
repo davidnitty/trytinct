@@ -5,6 +5,9 @@ fail-closed gating (family gate, adapter validation) that runs before any
 model load.
 """
 
+import json
+from pathlib import Path
+
 import pytest
 from typer.testing import CliRunner
 
@@ -16,6 +19,16 @@ MISTRAL_MODEL = "mistralai/Mistral-7B-Instruct-v0.2"
 LLAMA_MODEL = "meta-llama/Llama-3.1-8B"
 
 
+def _make_adapter(path: Path, config: dict | None = None) -> Path:
+    """Create a minimal valid PEFT LoRA adapter directory."""
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "adapter_config.json").write_text(
+        json.dumps(config or {"peft_type": "LORA"}), encoding="utf-8"
+    )
+    (path / "adapter_model.safetensors").write_bytes(b"x")
+    return path
+
+
 def test_certify_missing_adapter_dir(tmp_path):
     """A valid family but a nonexistent adapter directory -> exit 1."""
     result = runner.invoke(app, ["certify",
@@ -23,7 +36,7 @@ def test_certify_missing_adapter_dir(tmp_path):
                                  "--base-model", LLAMA_MODEL,
                                  "--root", str(tmp_path)])
     assert result.exit_code == 1, result.output
-    assert "Adapter not found" in result.output
+    assert "Adapter path does not exist" in result.output
 
 
 def test_certify_rejects_non_adapter_directory(tmp_path):
@@ -36,7 +49,7 @@ def test_certify_rejects_non_adapter_directory(tmp_path):
                                  "--base-model", LLAMA_MODEL,
                                  "--root", str(tmp_path)])
     assert result.exit_code == 1, result.output
-    assert "does not look like a LoRA adapter" in result.output
+    assert "Missing adapter_config.json" in result.output
 
 
 def test_certify_rejects_unknown_family(tmp_path):
@@ -60,9 +73,7 @@ def test_certify_rejects_gated_family(tmp_path):
 
 def test_certify_missing_canaries_file(tmp_path):
     """A missing --canaries file -> exit 1 (checked before model load)."""
-    adapter = tmp_path / "adapter"
-    (adapter / "adapter_model.safetensors").parent.mkdir(parents=True)
-    (adapter / "adapter_model.safetensors").write_text("x")
+    adapter = _make_adapter(tmp_path / "adapter")
     result = runner.invoke(app, ["certify",
                                  "--adapter", str(adapter),
                                  "--base-model", LLAMA_MODEL,
@@ -70,3 +81,17 @@ def test_certify_missing_canaries_file(tmp_path):
                                  "--root", str(tmp_path)])
     assert result.exit_code == 1, result.output
     assert "Canaries file not found" in result.output
+
+
+def test_certify_reports_training_tool(tmp_path):
+    """The detected training tool is surfaced before any model load."""
+    adapter = _make_adapter(tmp_path / "adapter",
+                            {"peft_type": "LORA", "unsloth_version": "2024.1"})
+    result = runner.invoke(app, ["certify",
+                                 "--adapter", str(adapter),
+                                 "--base-model", LLAMA_MODEL,
+                                 "--root", str(tmp_path)])
+    # The validator runs BEFORE the model load; what happens after depends on
+    # the environment (GPU/token/gated model), so only the tool line is
+    # asserted here.
+    assert "training tool: unsloth" in result.output
