@@ -80,6 +80,24 @@ def test_detect_qlora_adapter(tmp_path: Path):
     assert result["adapter_type"] == "peft-qlora"
 
 
+def test_empty_directory(tmp_path: Path):
+    # An empty adapter dir fails on the missing adapter_config.json.
+    (tmp_path / "adapter").mkdir()
+    result = validate_adapter_structure(tmp_path / "adapter")
+    assert result["valid"] is False
+    assert result["adapter_type"] is None
+
+
+def test_detect_bin_weights(tmp_path: Path):
+    # Pickle .bin weights are accepted for import (hashed, never executed).
+    _write_adapter(tmp_path, {"peft_type": "LORA"}, weights=False)
+    (tmp_path / "adapter_model.bin").write_bytes(b"dummy")
+    result = validate_adapter_structure(tmp_path)
+    assert result["valid"] is True
+    assert result["has_bin"] is True
+    assert result["has_safetensors"] is False
+
+
 def test_non_lora_peft_type_reported(tmp_path: Path):
     _write_adapter(tmp_path, {"peft_type": "PREFIX_TUNING"})
     result = validate_adapter_structure(tmp_path)
