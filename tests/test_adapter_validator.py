@@ -11,11 +11,22 @@ from tinct.core.adapter_validator import (
 )
 
 
-def _write_adapter(path: Path, config: dict, weights: bool = True) -> None:
+def _safetensors_bytes() -> bytes:
+    """A minimal valid safetensors file (header + 4 bytes of data)."""
+    header = json.dumps(
+        {"weight": {"dtype": "F32", "shape": [1], "data_offsets": [0, 4]}}
+    ).encode("utf-8")
+    return len(header).to_bytes(8, "little") + header + b"\x00\x00\x00\x00"
+
+
+def _write_adapter(path: Path, config: dict, weights: bool = True,
+                   weight_bytes: bytes | None = None) -> None:
     path.mkdir(parents=True, exist_ok=True)
     (path / "adapter_config.json").write_text(json.dumps(config), encoding="utf-8")
     if weights:
-        (path / "adapter_model.safetensors").write_bytes(b"dummy")
+        (path / "adapter_model.safetensors").write_bytes(
+            weight_bytes if weight_bytes is not None else _safetensors_bytes()
+        )
 
 
 def test_valid_peft_adapter(tmp_path: Path):
@@ -96,6 +107,15 @@ def test_detect_bin_weights(tmp_path: Path):
     assert result["valid"] is True
     assert result["has_bin"] is True
     assert result["has_safetensors"] is False
+
+
+def test_corrupt_safetensors_rejected(tmp_path: Path):
+    # Garbage weights (e.g. a truncated download) fail the header check
+    # before any base-model download is attempted.
+    _write_adapter(tmp_path, {"peft_type": "LORA"}, weight_bytes=b"x")
+    result = validate_adapter_structure(tmp_path)
+    assert result["valid"] is False
+    assert any("Invalid or corrupt" in e for e in result["errors"])
 
 
 def test_non_lora_peft_type_reported(tmp_path: Path):

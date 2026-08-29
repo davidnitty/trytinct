@@ -28,14 +28,14 @@ def test_check_allowed_default():
 
 
 def test_check_rejects_known_but_not_allowed():
-    # qwen is *detectable* but not *allowed* in V0 -> fail-closed.
+    # deepseek is *detectable* but not *allowed* by default -> fail-closed.
     with pytest.raises(UnsupportedModelFamily):
-        check_model_family("Qwen/Qwen2.5-7B")
+        check_model_family("deepseek-ai/DeepSeek-R1")
 
 
 def test_check_uses_project_allowed_list():
-    # A project that adds 'qwen' to model_families_allowed passes.
-    assert check_model_family("Qwen/Qwen2.5-7B", allowed_families=["llama", "qwen"]) == "qwen"
+    # A project that adds 'deepseek' to model_families_allowed passes.
+    assert check_model_family("deepseek-ai/DeepSeek-R1", allowed_families=["llama", "deepseek"]) == "deepseek"
 
 
 def test_check_rejects_outside_allowed():

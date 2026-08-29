@@ -52,7 +52,7 @@ def test_resolve_hub_id_requires_huggingface_hub(monkeypatch):
     from tinct.storage import paths as paths_mod
     monkeypatch.setattr(
         paths_mod, "_snapshot_hub",
-        lambda hub_id, cache_dir: (_ for _ in ()).throw(MissingDependencyError("train")),
+        lambda hub_id: (_ for _ in ()).throw(MissingDependencyError("train")),
     )
     with pytest.raises(MissingDependencyError):
         resolve_model("meta-llama/Llama-3.2-1B")

@@ -28,7 +28,7 @@ KNOWN_MODEL_FAMILIES: tuple[str, ...] = (
 )
 
 # Default whitelist: families with full training + validation support.
-SUPPORTED_MODEL_FAMILIES: tuple[str, ...] = ("llama", "mistral")
+SUPPORTED_MODEL_FAMILIES: tuple[str, ...] = ("llama", "mistral", "qwen")
 
 
 class UnsupportedModelFamily(ValueError):

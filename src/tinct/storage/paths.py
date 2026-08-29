@@ -107,12 +107,15 @@ def get_cache_dir(project_root: Path | str | None = None) -> Path:
     return TinctPaths(project_root).cache_dir
 
 
-def resolve_model(model_id: str, cache_dir: Path | None = None) -> Path:
-    """Return a local directory for ``model_id``, downloading it into the local
-    cache first when it is a Hugging Face hub id.
+def resolve_model(model_id: str) -> Path:
+    """Return a local directory for ``model_id``, downloading it into the
+    standard Hugging Face cache first when it is a hub id.
+
+    Models live in the shared default HF cache (``~/.cache/huggingface``) so
+    they are reused across projects and by other tools.
 
     Raises:
-        ValueError: If the resolved directory lacks a safetensors index
+        ValueError: If the resolved directory lacks safetensors weights
             (fail-closed: tinct only runs on safetensors; pickled ``.bin``
             checkpoints are blocked by the chunker regardless).
         MissingDependencyError: When ``model_id`` is a hub id but the HF
@@ -122,12 +125,12 @@ def resolve_model(model_id: str, cache_dir: Path | None = None) -> Path:
     if local.is_dir():
         target = local
     else:
-        target = _snapshot_hub(hub_id=model_id, cache_dir=cache_dir)
+        target = _snapshot_hub(hub_id=model_id)
     if not (_has_safetensors(target)):
         raise ValueError(
             f"Model at {target} has no safetensors weights (need a "
             "model.safetensors file or a model.safetensors.index.json). "
-            "tinct requires safetensors (pickle .bin is blocked)."
+            "tinct requires safetensors weights (pickle .bin is blocked)."
         )
     return target.resolve()
 
@@ -141,8 +144,9 @@ def _has_safetensors(model_dir: Path) -> bool:
     return False
 
 
-def _snapshot_hub(hub_id: str, cache_dir: Path | None) -> Path:
-    """Download a HF hub repo into the cache and return its local path."""
+def _snapshot_hub(hub_id: str) -> Path:
+    """Download a HF hub repo into the default HF cache; returns its local
+    path. Cached snapshots are reused without network access."""
     try:
         from huggingface_hub import snapshot_download
     except ImportError as exc:  # pragma: no cover - depends on env
@@ -150,7 +154,4 @@ def _snapshot_hub(hub_id: str, cache_dir: Path | None) -> Path:
             "Downloading a model from the Hub requires huggingface_hub, which "
             "is not installed. Install it with:\n\n    pip install tinct[train]\n"
         ) from exc
-    cache_root = cache_dir or get_cache_dir()
-    return Path(
-        snapshot_download(repo_id=hub_id, cache_dir=str(cache_root / "hub"))
-    )
+    return Path(snapshot_download(repo_id=hub_id))

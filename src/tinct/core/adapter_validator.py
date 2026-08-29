@@ -30,6 +30,25 @@ def _result(valid: bool, errors: list[str],
     }
 
 
+def _safetensors_header_ok(path: Path) -> bool:
+    """Cheap, dependency-free sanity check of a safetensors file header.
+
+    A safetensors file starts with an 8-byte little-endian header length
+    followed by a JSON header. Truncated downloads and garbage files fail
+    here — long before any base-model download.
+    """
+    try:
+        with path.open("rb") as fh:
+            header_size = int.from_bytes(fh.read(8), "little")
+            if header_size <= 0 or header_size > 100_000_000:
+                return False
+            header = fh.read(header_size)
+        json.loads(header.decode("utf-8"))
+        return True
+    except Exception:
+        return False
+
+
 def validate_adapter_structure(adapter_path: Path) -> dict:
     """Validate that an adapter directory has the expected PEFT structure.
 
@@ -72,11 +91,19 @@ def validate_adapter_structure(adapter_path: Path) -> dict:
         )
 
     # Adapter weights: safetensors preferred, pickle .bin tolerated on import
-    # (the weights are hashed, never executed).
+    # (the weights are hashed, never executed). Safetensors files are
+    # header-validated here so corrupt/garbage files fail before any
+    # base-model download.
     has_safetensors = (adapter_path / "adapter_model.safetensors").exists()
     has_bin = (adapter_path / "adapter_model.bin").exists()
     if not has_safetensors and not has_bin:
         errors.append("Missing adapter_model.safetensors or adapter_model.bin")
+    elif has_safetensors and not _safetensors_header_ok(
+            adapter_path / "adapter_model.safetensors"):
+        errors.append(
+            "Invalid or corrupt adapter_model.safetensors "
+            "(failed to read safetensors header)"
+        )
 
     # Detect adapter type from peft_type (+ quantization markers for QLoRA).
     adapter_type = "unknown"

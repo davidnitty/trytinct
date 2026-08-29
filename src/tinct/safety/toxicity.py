@@ -17,6 +17,10 @@ import math
 import re
 from typing import Optional
 
+from tinct.utils.logging import get_logger
+
+log = get_logger("tinct.safety.toxicity")
+
 # --- Tier 1: keyword heuristic ----------------------------------------------
 
 TOXIC_KEYWORDS = [
@@ -69,17 +73,34 @@ def score_toxicity_heuristic(text: str) -> float:
 # --- Tier 2: Detoxify (optional) --------------------------------------------
 
 _detoxify_model = None
+_detoxify_load_failed = False
 
 
 def _load_detoxify():
-    """Lazy-load the Detoxify model to avoid import at module scope."""
-    global _detoxify_model
+    """Lazy-load the Detoxify model to avoid import at module scope.
+
+    Returns None when Detoxify is unavailable for ANY reason (not installed,
+    weights unreachable, load failure) — the caller falls back to the Tier 1
+    heuristic. A failed load is remembered so per-response calls don't retry
+    a large download.
+    """
+    global _detoxify_model, _detoxify_load_failed
+    if _detoxify_load_failed:
+        return None
     if _detoxify_model is None:
         try:
             from detoxify import Detoxify
 
             _detoxify_model = Detoxify("original")
-        except ImportError:
+        except Exception as exc:
+            # ImportError (not installed) or load failures (checkpoint
+            # download, unreachable hub) — fall back to Tier 1 heuristic.
+            log.warning(
+                "[tinct] Detoxify unavailable (%s); toxicity gate falls back "
+                "to the keyword heuristic.",
+                exc,
+            )
+            _detoxify_load_failed = True
             return None
     return _detoxify_model
 

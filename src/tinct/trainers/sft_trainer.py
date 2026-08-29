@@ -132,7 +132,10 @@ def run_sft(
             FailClosedCore.__init__(self, threshold, log_path, fail_path)
 
         def on_log(self, args, state, control, logs=None, **kwargs):
-            return FailClosedCore.on_log(self, state, control, logs)
+            # Mutates `control` in place and MUST return None — transformers
+            # replaces `control` with any non-None callback return, and a bare
+            # bool breaks the training loop ('bool' has no attribute ...).
+            FailClosedCore.on_log(self, state, control, logs)
 
     # --- 4. Load tokenizer & model via the accelerator engine ---
     # The accelerator applies LoRA itself, so SFTTrainer is only given the

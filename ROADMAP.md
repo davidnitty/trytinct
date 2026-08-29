@@ -44,20 +44,25 @@ Last updated: 2026-08
 - Ship gate: adapter toxicity >2x baseline → FAIL
 - Aggregate gate verdict (`safety_gates.result`) across all three gates
 
-### v1.0.0 — Integration Layer + Mistral ✅
-- **`tinct certify`**: certify adapters from any training pipeline
-  (LLaMA-Factory, Unsloth, Axolotl) — eval gates + signed evidence,
-  standalone (no `tinct init` required), both verdicts signed
-- **Mistral / Mixtral support**: strict `[INST]`/`[/INST]` template
-  validation (balance + BOS/EOS); Mixtral maps to the mistral family
-- Mistral enabled by default in the model-family gate and project allowlist
-- LoRA adapter validation (fail-closed before model load)
-
 ---
 
 ## In Progress
 
-### v1.1.0 — Hardening + Dashboard 🚧
+### v1.0.0 — Integration Layer + Mistral 🚧
+- `tinct certify` command for external adapters (LLaMA-Factory / Unsloth / Axolotl)
+- Mistral model family support (`[INST]`/`[/INST]` template validation)
+- Adapter import validation: PEFT structure, adapter type, training-tool detection
+- Evidence bundle `training_tool` / `training_executed` provenance fields
+- Adapter/base-model compatibility gate
+- Model registry (Tier 1/2/3 support levels)
+- `tinct doctor` preflight (deps, GPU, HF access, project state)
+- *Remaining before tagging: end-to-end certification on GPU with real weights*
+
+---
+
+## Planned
+
+### v1.1.0 — Hardening + Dashboard
 - **Frontend dashboard**: visualize evidence, safety gates, DPO metrics
 - **Multi-GPU training**: DeepSpeed ZeRO-3 integration
 - **Model export**: GGUF / ONNX export with signed provenance

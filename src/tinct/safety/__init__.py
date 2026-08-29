@@ -1,10 +1,4 @@
-"""Behavioral certification gates — canary leakage, refusal regression,
-toxicity increase.
-
-These move ``tinct`` from "does it run?" to "is it safe?" The pure detection
-functions are dependency-free and CPU-testable; the model-generation glue
-lives in :mod:`tinct.safety.gates`.
-"""
+"""Behavioral safety gates and model provenance."""
 
 from tinct.safety.canaries import (
     canary_text,

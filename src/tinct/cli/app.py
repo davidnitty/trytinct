@@ -13,6 +13,7 @@ Command tree::
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import typer
@@ -21,7 +22,7 @@ from tinct import __version__
 from tinct.core.project import Project
 from tinct.utils.logging import get_console, setup_logging
 
-from . import certify_cmd, eval_cmd, init_cmd, ship_cmd, train_cmd, validate_cmd
+from . import certify_cmd, doctor_cmd, eval_cmd, init_cmd, ship_cmd, train_cmd, validate_cmd
 from .security_cmd import security_app
 
 app = typer.Typer(
@@ -180,6 +181,21 @@ def certify(
                                   skip_safety=skip_safety))
 
 
+# -- preflight ---------------------------------------------------------------
+
+@app.command("doctor")
+def doctor(
+    root: Path = typer.Option(".", "--root", help="Project/state root (.tinct)."),
+) -> None:
+    """Preflight: dependencies, GPU, model access, project state."""
+    _exit(doctor_cmd.run_doctor(root))
+
+
 def main() -> None:
     """CLI launcher — invoked by the console script / ``python -m tinct``."""
+    # Bound Hugging Face network stalls (gated/unreachable models can hang
+    # model loads for many minutes on slow links). Users can still override
+    # these by exporting their own values.
+    os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "10")
+    os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "15")
     app()

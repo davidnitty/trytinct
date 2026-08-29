@@ -120,37 +120,56 @@ tinct security check --run run_XXX
 
 ---
 
-## CLI Reference
+## Certifying External Adapters
 
-| Command | Purpose |
-|---------|---------|
-| `tinct init <name> <model>` | Initialize project + signing keys |
-| `tinct validate <dataset>` | Data Doctor: schema, templates, duplicates |
-| `tinct advise <dataset>` | Rule-based method recommendation |
-| `tinct train` | Guarded training (SFT/DPO) |
-| `tinct eval` | Certification gates (smoke test, safety) |
-| `tinct ship` | Sign evidence, issue verdict |
-| `tinct certify --adapter DIR --base-model ID` | Certify an externally trained adapter |
-| `tinct security check [--run ID]` | Verify signed evidence |
+If you trained a model with **LLaMA-Factory**, **Unsloth**, **Axolotl**, or any
+other tool, use `tinct certify` to validate and certify it:
+
+```bash
+# Certify an adapter trained with LLaMA-Factory
+tinct certify \
+  --adapter ./my_llama_factory_adapter \
+  --base-model meta-llama/Llama-3.1-8B
+
+# Certify an adapter trained with Unsloth
+tinct certify \
+  --adapter ./my_unsloth_adapter \
+  --base-model Qwen/Qwen2.5-7B-Instruct
+
+# Certify with optional dataset reference
+tinct certify \
+  --adapter ./my_adapter \
+  --base-model meta-llama/Llama-3.1-8B \
+  --dataset ./train_data.jsonl
+```
+
+This will:
+
+1. Validate the adapter structure (PEFT format)
+2. Run eval gates (smoke test)
+3. Run safety gates (refusal regression + toxicity)
+4. Sign the evidence bundle
+5. Issue SHIP or DON'T SHIP verdict
+
+> Note: Canary leakage detection is skipped for external adapters (since tinct
+> didn't inject canaries during training). tinct works standalone — no
+> `tinct init` required.
 
 ---
 
-## Integration Layer
+## CLI Reference
 
-Trained with LLaMA-Factory, Unsloth, or Axolotl? tinct certifies adapters from
-any training pipeline:
-
-```bash
-tinct certify \
-  --adapter ./my_adapter \
-  --base-model mistralai/Mistral-7B-Instruct-v0.2 \
-  --canaries canaries.json   # optional, for the leakage gate
-```
-
-tinct loads your adapter onto its base model, runs the certification gates
-(generation smoke test + behavioral safety gates), signs the evidence bundle,
-and issues **SHIP** (exit 0) or **DON'T SHIP** (exit 2) with cryptographic
-proof. Works standalone — no `tinct init` required.
+| Command | Description |
+|---------|-------------|
+| `tinct init` | Initialize project + signing keys |
+| `tinct validate` | Data Doctor: schema, templates, duplicates |
+| `tinct advise` | Rule-based method recommendation |
+| `tinct train` | Guarded training (SFT/DPO) |
+| `tinct certify` | Certify externally-trained adapters |
+| `tinct eval` | Certification gates (smoke test, safety) |
+| `tinct ship` | Sign evidence, issue verdict |
+| `tinct security check` | Verify signed evidence |
+| `tinct doctor` | Preflight: deps, GPU, model access |
 
 ---
 
@@ -242,12 +261,11 @@ The final certification is stored separately as a signed manifest:
 | Family | Status | Acceleration |
 |--------|--------|--------------|
 | Llama 3.x | ✅ Supported | Unsloth + HF |
-| Qwen 2.5 | ✅ Supported (validation) | Unsloth + HF* |
+| Qwen 2.5 | ✅ Supported | Unsloth + HF |
 | Mistral / Mixtral | ✅ Supported | Unsloth + HF |
+| Gemma 3 | 🚧 Planned | — |
+| Phi-4 | 🚧 Planned | — |
 | DeepSeek | 🚧 Planned | — |
-
-\* Qwen template validation is fully supported; accelerated Qwen training
-follows Unsloth's model coverage.
 
 ---
 

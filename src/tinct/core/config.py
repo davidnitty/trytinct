@@ -107,7 +107,7 @@ class ProjectConfig(BaseModel):
     project_name: str
     created_at: str = Field(default_factory=lambda: _dt.datetime.now(_dt.timezone.utc).isoformat())
     # User-facing policy knobs written by `tinct init`.
-    model_families_allowed: list[str] = Field(default_factory=lambda: ["llama", "mistral"])
+    model_families_allowed: list[str] = Field(default_factory=lambda: ["llama", "mistral", "qwen"])
     default_lora_rank: int = Field(default=16, ge=1)
     max_loss_threshold: float = Field(default=10.0, ge=0.0)
     fail_closed: bool = True

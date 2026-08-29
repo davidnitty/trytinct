@@ -56,11 +56,10 @@ def prepare_base_model_chunks(
     Returns the resolved local path to the model (used as the training base).
     """
     console = get_console()
-    cache_dir = get_cache_dir(project.root)
     console.print("[tinct] Preparing base model for low-VRAM streaming...")
 
-    model_path = resolve_model(model_id, cache_dir=cache_dir)
-    chunker = ModelChunker(cache_dir)
+    model_path = resolve_model(model_id)
+    chunker = ModelChunker(get_cache_dir(project.root))
     chunk_manifest = chunker.chunk_model(model_path, chunk_size_mb=chunk_size_mb)
 
     manifest_path = run_dir / "base_model_chunks.json"

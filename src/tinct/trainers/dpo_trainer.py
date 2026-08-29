@@ -185,13 +185,16 @@ def run_dpo(
             self.fail_path = fail_path
 
         def on_log(self, args, state, control, logs=None, **kwargs):
+            # Mutates `control` in place and MUST return None — transformers
+            # replaces `control` with any non-None callback return, and a bare
+            # bool breaks the training loop ('bool' has no attribute ...).
             if not logs:
-                return False
+                return
             with open(self.log_path, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps({"step": state.global_step, **logs}) + "\n")
 
-            halted = RewardInversionCore.on_log(self, state, control, logs)
-            if halted and not self.fail_path.exists():
+            RewardInversionCore.on_log(self, state, control, logs)
+            if self.aborted and not self.fail_path.exists():
                 last = self.margins[-1]
                 with open(self.fail_path, "w", encoding="utf-8") as fh:
                     json.dump({
@@ -201,7 +204,6 @@ def run_dpo(
                         "step": last["step"],
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }, fh)
-            return halted
 
     # --- 4. Load model & tokenizer via the accelerator engine ---
     # The accelerator applies LoRA itself, so DPOTrainer gets the final model

@@ -93,13 +93,24 @@ def _make_generator(model_name: str, adapter_dir: Optional[Path]) -> Callable[[s
     from peft import PeftModel
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    def _from_pretrained(loader, name: str, **kwargs):
+        """Load from the Hub, falling back to the local cache on network
+        failures (flaky links must not break certification of a cached model)."""
+        try:
+            return loader.from_pretrained(name, **kwargs)
+        except (OSError, ConnectionError) as exc:
+            if "offline mode" in str(exc).lower():
+                raise
+            log.warning("[tinct] Hub unreachable (%s); retrying from local cache", exc)
+            return loader.from_pretrained(name, local_files_only=True, **kwargs)
+
+    tokenizer = _from_pretrained(AutoTokenizer, model_name)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
     torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-    base = AutoModelForCausalLM.from_pretrained(
-        model_name, torch_dtype=torch_dtype, device_map="auto"
+    base = _from_pretrained(
+        AutoModelForCausalLM, model_name, torch_dtype=torch_dtype, device_map="auto"
     )
     model = PeftModel.from_pretrained(base, str(adapter_dir)) if adapter_dir else base
     model.eval()
