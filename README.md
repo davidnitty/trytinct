@@ -63,14 +63,6 @@ If any check fails, tinct refuses to ship the model. No exceptions.
 
 ---
 
-### How to explain it to your friend in one sentence
-
-> *"tinct **does** fine-tune models. But unlike normal training tools that
-> just blindly train the AI, tinct also acts like a safety inspector that
-> tests the AI for toxicity and data leaks before letting you use it."*
-
----
-
 ## Installation
 
 ```bash
