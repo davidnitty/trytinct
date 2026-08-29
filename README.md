@@ -2,27 +2,72 @@
 
 ![CI](https://github.com/davidnitty/trytinct/actions/workflows/ci.yml/badge.svg)
 
-**Certified post-training for LLMs.**
-
-tinct is a fail-closed CLI that trains, evaluates, and cryptographically
-certifies fine-tuned language models. Every run produces signed evidence
-proving the model doesn't just run — it behaves safely.
+**Fine-tune AI models and prove they are safe to use.**
 
 ---
 
-## Why tinct?
+## What is this?
 
-Most fine-tuning tools stop at "training completed." tinct asks harder questions:
+Most AI training tools just train your model and hope it behaves well.
+**tinct is different.**
 
-| Question | Gate |
-|----------|------|
-| Did the model memorize your training data? | **Canary leakage detection** |
-| Did training break the model's safety refusals? | **Refusal regression testing** |
-| Did the model start preferring bad answers? | **Reward inversion guards** |
-| Did loss explode or go NaN? | **Fail-closed training monitors** |
-| Can you prove what shipped? | **Ed25519 signed evidence** |
+tinct is an all-in-one tool that **fine-tunes AI models** and automatically
+runs safety checks to ensure you didn't accidentally make the model toxic,
+leak private data, or break its safety filters.
 
-If any gate fails, tinct refuses to ship. No exceptions.
+If your model passes tinct's tests, it gives you a cryptographically signed
+certificate saying "this model is safe to ship." If it fails, it stops you
+from using it.
+
+---
+
+## Two ways to use tinct
+
+### 1. Train a model from scratch (The Safe Way)
+
+You can use tinct to fine-tune your own models. Unlike other tools, tinct has
+"fail-closed" guards: if the training goes wrong or the model starts
+memorizing secrets, tinct stops the training automatically.
+
+```bash
+# Fine-tune a model with tinct's built-in safety guards
+tinct train --model meta-llama/Llama-3.1-8B --dataset my_data.jsonl
+```
+
+### 2. Check a model you trained elsewhere
+
+If you already trained a model using another tool (like Unsloth,
+LLaMA-Factory, or Axolotl), you can pass it to tinct to run the safety
+checks.
+
+```bash
+# Test a model you trained with another tool
+tinct certify --adapter ./my_model --base-model meta-llama/Llama-3.1-8B
+```
+
+---
+
+## What do the safety checks do?
+
+Whether you train it in tinct or bring your own model, tinct runs 4 critical
+tests:
+
+| Check | What it catches |
+|-------|-----------------|
+| 🔐 **Data Leakage** | Did the model memorize private data or secrets from the training set? |
+| 🛡️ **Safety Refusals** | Did the training accidentally remove the model's ability to say "no" to harmful requests? |
+| ☠️ **Toxicity** | Did the training make the model more offensive or harmful than the base model? |
+| 📉 **Training Health** | Did the math break (loss explosion) while the model was learning? |
+
+If any check fails, tinct refuses to ship the model. No exceptions.
+
+---
+
+### How to explain it to your friend in one sentence
+
+> *"tinct **does** fine-tune models. But unlike normal training tools that
+> just blindly train the AI, tinct also acts like a safety inspector that
+> tests the AI for toxicity and data leaks before letting you use it."*
 
 ---
 
