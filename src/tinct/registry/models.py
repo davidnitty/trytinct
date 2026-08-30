@@ -43,7 +43,7 @@ MODEL_REGISTRY = {
         "tier": 1,
         "template": "mistral-chat",
         "accelerator": ["unsloth", "hf"],
-        "safety_gates": ["canary", "refusal", "toxicity"],
+        "safety_gates": ["canary", "refusal", "toxicity", "expert_collapse"],
     },
     # Tier 2: Basic support (template validation only)
     "google/gemma-2-9b-it": {

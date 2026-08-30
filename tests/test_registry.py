@@ -47,6 +47,9 @@ def test_get_safety_gates():
     assert get_safety_gates("mistralai/Mistral-7B-Instruct-v0.3") == [
         "canary", "refusal", "toxicity"
     ]
+    assert get_safety_gates("mistralai/Mixtral-8x7B-Instruct-v0.1") == [
+        "canary", "refusal", "toxicity", "expert_collapse"
+    ]
     assert get_safety_gates("google/gemma-2-9b-it") == []
 
 

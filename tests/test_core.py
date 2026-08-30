@@ -206,6 +206,13 @@ def test_family_for_model_detects_qwen():
     assert family_for_model(None) is None
 
 
+def test_family_for_model_mixtral_maps_to_mistral():
+    # Mixtral is Mistral's MoE line and uses the identical [INST] template,
+    # so it must route to the mistral validator (v1.1 Mixtral vanguard).
+    assert family_for_model("mistralai/Mixtral-8x7B-Instruct-v0.1") == "mistral"
+    assert validate_chat_template(MISTRAL_GOOD, family_for_model("Mixtral-8x7B-Instruct")) == []
+
+
 def test_validate_qwen_chat_template_valid():
     assert validate_qwen_chat_template(QWEN_GOOD) == []
 

@@ -14,6 +14,11 @@ Last updated: 2026-08
 - MoE-aware checkpointing (save only active experts to save disk space)
 - Custom expert routing logic for the `accelerators.py` engine
 
+**Phase 1 (Mixtral vanguard) — landed:**
+- ✅ Expert Collapse safety gate (`safety/moe_gates.py`): forward-hook router
+  tracking, <1% utilization → FAIL, runs in `tinct eval --safety` / `tinct certify`
+- ✅ Mixtral routes to Mistral `[INST]` template validation (Data Doctor)
+
 ---
 
 ## Completed

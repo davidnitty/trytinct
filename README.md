@@ -49,7 +49,7 @@ tinct certify --adapter ./my_model --base-model meta-llama/Llama-3.1-8B
 
 ## What do the safety checks do?
 
-Whether you train it in tinct or bring your own model, tinct runs 4 critical
+Whether you train it in tinct or bring your own model, tinct runs 5 critical
 tests:
 
 | Check | What it catches |
@@ -58,6 +58,7 @@ tests:
 | 🛡️ **Safety Refusals** | Did the training accidentally remove the model's ability to say "no" to harmful requests? |
 | ☠️ **Toxicity** | Did the training make the model more offensive or harmful than the base model? |
 | 📉 **Training Health** | Did the math break (loss explosion) while the model was learning? |
+| ☣️ **Expert Collapse** (MoE models) | Did the router get lazy during training and send all tokens to 1-2 "favorite" experts, leaving the rest untrained? |
 
 If any check fails, tinct refuses to ship the model. No exceptions.
 
