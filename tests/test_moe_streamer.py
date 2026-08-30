@@ -7,10 +7,10 @@ module naming (``block_sparse_moe.experts.N``) so ``iter_moe_experts`` matches
 genuinely.
 """
 
-import torch
-import torch.nn as nn
-
 import pytest
+
+torch = pytest.importorskip("torch")  # MoE tests need torch; skip cleanly without it
+import torch.nn as nn
 
 from tinct.engine.moe import MoEStreamer, ExpertLRUCache, iter_moe_experts, iter_moe_routers
 

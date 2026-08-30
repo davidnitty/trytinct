@@ -10,7 +10,9 @@ Two mock strategies, both running on CPU without any model downloads:
   weight-dependent.
 """
 
-import torch
+import pytest
+
+torch = pytest.importorskip("torch")  # MoE tests need torch; skip cleanly without it
 import torch.nn as nn
 
 from tinct.engine.moe import iter_moe_experts, iter_moe_routers
