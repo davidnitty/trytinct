@@ -5,7 +5,8 @@ boundaries:
 
 - No top-level heavy imports (torch/trl/peft/transformers). This module is
   only loaded dynamically when ``tinct train`` executes.
-- Trusts **no** remote code by default (``trust_remote_code=False``).
+- Model loading uses ``trust_remote_code=True`` (required for Qwen and other
+  custom-code model families).
 - Saves safetensors only (pickle ``.bin`` blocked).
 - **Fail-closed loss guard**: a callback monitors the loss every log step and
   halts the run if it is NaN, infinite, or exceeds ``max_loss_threshold``,

@@ -61,14 +61,14 @@ def run_generation_smoke_test(
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     log.info("[tinct eval] Loading base model and attaching adapter...")
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
     # CPU-safe dtype: float32 when no CUDA (float16 fails on CPU).
     torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
     base_model = AutoModelForCausalLM.from_pretrained(
-        model_name, torch_dtype=torch_dtype, device_map="auto",
+        model_name, trust_remote_code=True, torch_dtype=torch_dtype, device_map="auto",
     )
     model = PeftModel.from_pretrained(base_model, str(adapter_path))
     model.eval()

@@ -7,8 +7,10 @@ Two layers:
   three behavioral gates (canary leakage, refusal regression, toxicity). It is
   fully CPU-testable with mocked callables.
 - :func:`run_safety_gates_for_run` is the model-loading glue used by the CLI:
-  it lazily builds those callables from the base model and the trained adapter
-  (same pattern as :mod:`tinct.evals.smoke_test`).
+  it loads the base model **once**, attaches the adapter on top of the shared
+  weights, and derives both callables from that single copy (the base pass
+  runs under ``disable_adapter()``). Loading the model twice is the classic
+  cause of OOM on 8-16 GB GPUs.
 
 The detection functions in :mod:`tinct.safety.canaries`,
 :mod:`tinct.safety.refusal` and :mod:`tinct.safety.toxicity` are the tested,
@@ -17,6 +19,8 @@ dependency-free cores.
 
 from __future__ import annotations
 
+import logging
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -24,6 +28,8 @@ from tinct.engine.deps import ensure_train_deps
 from tinct.safety.canaries import check_canary_leakage
 from tinct.safety.refusal import SAFETY_PROMPTS, check_refusal_regression
 from tinct.safety.toxicity import NEUTRAL_PROMPTS, check_toxicity_increase
+
+log = logging.getLogger(__name__)
 
 # Enough tokens to reproduce a canary phrase or a refusal, and keeps
 # CPU-only safety evals fast.
@@ -86,54 +92,16 @@ def run_safety_gates(
     return results
 
 
-def _make_generator(model_name: str, adapter_dir: Optional[Path]) -> Callable[[str], str]:
-    """Return a ``prompt -> response`` callable backed by the (adapted) model."""
-    ensure_train_deps()
-    import torch
-    from peft import PeftModel
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-
-    def _from_pretrained(loader, name: str, **kwargs):
-        """Load from the Hub, falling back to the local cache on network
-        failures (flaky links must not break certification of a cached model)."""
-        try:
-            return loader.from_pretrained(name, **kwargs)
-        except (OSError, ConnectionError) as exc:
-            if "offline mode" in str(exc).lower():
-                raise
-            log.warning("[tinct] Hub unreachable (%s); retrying from local cache", exc)
-            return loader.from_pretrained(name, local_files_only=True, **kwargs)
-
-    tokenizer = _from_pretrained(AutoTokenizer, model_name)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-
-    torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-    base = _from_pretrained(
-        AutoModelForCausalLM, model_name, torch_dtype=torch_dtype, device_map="auto"
-    )
-    model = PeftModel.from_pretrained(base, str(adapter_dir)) if adapter_dir else base
-    model.eval()
-
-    def generate(prompt: str) -> str:
-        messages = [{"role": "user", "content": prompt}]
-        try:
-            text = tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
-            )
-        except Exception:  # tokenizer has no chat template -> raw prompt
-            text = prompt
-        inputs = tokenizer(text, return_tensors="pt").to(model.device)
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=_MAX_NEW_TOKENS,
-                pad_token_id=tokenizer.eos_token_id,
-                eos_token_id=tokenizer.eos_token_id,
-            )
-        return tokenizer.decode(outputs[0][inputs.input_ids.shape[1] :], skip_special_tokens=True)
-
-    return generate
+def _from_pretrained(loader, name: str, **kwargs):
+    """Load from the Hub, falling back to the local cache on network
+    failures (flaky links must not break certification of a cached model)."""
+    try:
+        return loader.from_pretrained(name, **kwargs)
+    except (OSError, ConnectionError) as exc:
+        if "offline mode" in str(exc).lower():
+            raise
+        log.warning("[tinct] Hub unreachable (%s); retrying from local cache", exc)
+        return loader.from_pretrained(name, local_files_only=True, **kwargs)
 
 
 def run_safety_gates_for_run(
@@ -144,9 +112,59 @@ def run_safety_gates_for_run(
     toxicity_threshold: float = 2.0,
 ) -> dict[str, Any]:
     """Model-loading wrapper: builds ``prompt -> response`` callables for the
-    trained adapter and the base model, then runs :func:`run_safety_gates`."""
-    adapter_generate = _make_generator(model_name, adapter_dir)
-    base_generate = _make_generator(model_name, None)
+    trained adapter and the base model, then runs :func:`run_safety_gates`.
+
+    The base model is loaded exactly **once**; the adapter pass and the base
+    pass share those weights (the base pass runs under ``disable_adapter()``),
+    so certification never holds two copies of the model in memory.
+    """
+    ensure_train_deps()
+    import torch
+    from peft import PeftModel
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    tokenizer = _from_pretrained(AutoTokenizer, model_name, trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    # CPU-safe dtype: float16 only with CUDA (float16 fails on CPU).
+    torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+    model = _from_pretrained(
+        AutoModelForCausalLM,
+        model_name,
+        trust_remote_code=True,
+        torch_dtype=torch_dtype,
+        device_map="auto",
+    )
+    if adapter_dir is not None:
+        model = PeftModel.from_pretrained(model, str(adapter_dir))
+    model.eval()
+
+    def generate(prompt: str, *, use_adapter: bool = True) -> str:
+        messages = [{"role": "user", "content": prompt}]
+        try:
+            text = tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+        except Exception:  # tokenizer has no chat template -> raw prompt
+            text = prompt
+        inputs = tokenizer(text, return_tensors="pt").to(model.device)
+        needs_disable = adapter_dir is not None and not use_adapter
+        adapter_ctx = model.disable_adapter() if needs_disable else nullcontext()
+        with adapter_ctx, torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=_MAX_NEW_TOKENS,
+                pad_token_id=tokenizer.eos_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+            )
+        return tokenizer.decode(outputs[0][inputs.input_ids.shape[1] :], skip_special_tokens=True)
+
+    def adapter_generate(prompt: str) -> str:
+        return generate(prompt, use_adapter=True)
+
+    def base_generate(prompt: str) -> str:
+        return generate(prompt, use_adapter=False)
 
     return run_safety_gates(
         adapter_generate,

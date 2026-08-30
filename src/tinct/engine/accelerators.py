@@ -78,7 +78,7 @@ def _load_standard(model_name: str, lora_rank: int, load_in_4bit: bool = True):
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
     log.info("[tinct] Loading %s via standard Hugging Face...", model_name)
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -104,7 +104,7 @@ def _load_standard(model_name: str, lora_rank: int, load_in_4bit: bool = True):
         quantization_config=bnb_config,
         device_map="auto",
         torch_dtype=torch_dtype if not bnb_config else None,
-        trust_remote_code=False,  # security: never execute remote code
+        trust_remote_code=True,  # required for Qwen / custom-code model families
     )
     if bnb_config:
         model = prepare_model_for_kbit_training(model)
