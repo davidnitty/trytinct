@@ -28,6 +28,7 @@ def load_model_with_accelerator(
     lora_rank: int = 16,
     max_seq_length: int = 2048,
     load_in_4bit: bool = True,
+    offload_experts: bool = False,
 ):
     """Load the base model and apply LoRA, optionally via Unsloth.
 
@@ -36,10 +37,15 @@ def load_model_with_accelerator(
     (standard Hugging Face path) or ``"unsloth"`` (massive VRAM reduction).
     ``load_in_4bit`` enables 4-bit QLoRA on the standard path when CUDA +
     bitsandbytes are available (falls back to standard LoRA otherwise).
+    ``offload_experts`` enables MoE expert streaming (Mixtral-class models):
+    the model loads on CPU and experts stream to GPU on demand via an LRU
+    residency cache — no full-model VRAM spike.
     """
     if accelerator == "unsloth":
         return _load_unsloth(model_name, lora_rank, max_seq_length)
-    return _load_standard(model_name, lora_rank, load_in_4bit=load_in_4bit)
+    return _load_standard(
+        model_name, lora_rank, load_in_4bit=load_in_4bit, offload_experts=offload_experts
+    )
 
 
 def _load_unsloth(model_name: str, lora_rank: int, max_seq_length: int):
@@ -71,7 +77,12 @@ def _load_unsloth(model_name: str, lora_rank: int, max_seq_length: int):
     return model, tokenizer
 
 
-def _load_standard(model_name: str, lora_rank: int, load_in_4bit: bool = True):
+def _load_standard(
+    model_name: str,
+    lora_rank: int,
+    load_in_4bit: bool = True,
+    offload_experts: bool = False,
+):
     """Standard Hugging Face loading (CPU-safe) with optional 4-bit QLoRA."""
     import torch
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
@@ -99,15 +110,33 @@ def _load_standard(model_name: str, lora_rank: int, load_in_4bit: bool = True):
         except ImportError:
             log.info("[tinct] bitsandbytes missing. Using standard LoRA.")
 
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        quantization_config=bnb_config,
-        device_map="auto",
-        torch_dtype=torch_dtype if not bnb_config else None,
-        trust_remote_code=True,  # required for Qwen / custom-code model families
-    )
-    if bnb_config:
-        model = prepare_model_for_kbit_training(model)
+    if offload_experts:
+        # MoE path (Mixtral vanguard): load on CPU (device_map=None — never a
+        # full-model .to() VRAM spike), then stream experts on demand with an
+        # LRU residency cache. 4-bit quantization and expert offloading don't
+        # compose, so bnb is skipped on this branch.
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            trust_remote_code=True,  # required for Qwen / custom-code model families
+            torch_dtype=torch_dtype if has_cuda else torch.float32,
+            device_map=None,
+        )
+        from tinct.engine.moe import MoEStreamer
+
+        streamer = MoEStreamer(
+            model, device="cuda" if has_cuda else "cpu", max_resident_experts=2
+        ).prepare()
+        model._tinct_streamer = streamer  # keep alive; .stats feeds evidence
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            quantization_config=bnb_config,
+            device_map="auto",
+            torch_dtype=torch_dtype if not bnb_config else None,
+            trust_remote_code=True,  # required for Qwen / custom-code model families
+        )
+        if bnb_config:
+            model = prepare_model_for_kbit_training(model)
 
     lora_config = LoraConfig(
         r=lora_rank,

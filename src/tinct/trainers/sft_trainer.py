@@ -92,11 +92,14 @@ def run_sft(
     logging_steps: int = 10,
     max_seq_length: int = 2048,
     accelerator: str = "none",
+    offload_experts: bool = False,
 ) -> bool:
     """Execute a guarded SFT run.
 
     ``accelerator`` is ``"none"`` (standard HF path) or ``"unsloth"`` for
     low-VRAM Triton-kernel acceleration (requires ``tinct[unsloth]``).
+    ``offload_experts`` streams MoE expert MLPs from CPU on demand
+    (Mixtral-class models).
 
     Returns True on success, or False if halted by a fail-closed guard.
     """
@@ -150,6 +153,7 @@ def run_sft(
         lora_rank=lora_rank,
         max_seq_length=max_seq_length,
         load_in_4bit=True,  # QLoRA by default for memory safety
+        offload_experts=offload_experts,
     )
 
     # CPU-safe dtype logic: bf16 only on CUDA that supports it; float32 on CPU.

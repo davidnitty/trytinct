@@ -145,11 +145,14 @@ def run_dpo(
     max_length: int = 1024,
     num_train_epochs: int = 1,
     inversion_threshold: int = 3,
+    offload_experts: bool = False,
 ) -> bool:
     """Execute guarded DPO training.
 
     ``accelerator`` is ``"none"`` (standard HF path) or ``"unsloth"`` for
     low-VRAM Triton-kernel acceleration (requires ``tinct[unsloth]``).
+    ``offload_experts`` streams MoE expert MLPs from CPU on demand
+    (Mixtral-class models).
 
     Returns True on success, or False if halted by a fail-closed guard.
     ``dpo_metrics.json`` is persisted in either case.
@@ -217,6 +220,7 @@ def run_dpo(
         lora_rank=lora_rank,
         max_seq_length=max_seq_length,
         load_in_4bit=True,
+        offload_experts=offload_experts,
     )
 
     # CPU-safe dtype logic: bf16 only on CUDA that supports it; float32 on CPU.

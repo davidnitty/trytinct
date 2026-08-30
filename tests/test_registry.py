@@ -66,7 +66,7 @@ def test_mixtral_registry_declares_moe_profile():
     info = get_model_info("mistralai/Mixtral-8x7B-Instruct-v0.1")
     assert info["architecture"] == "moe"
     assert info["num_experts"] == 8
-    assert info["accelerator"] == ["hf"]  # Unsloth MoE support is experimental
+    assert info["accelerator"] == ["hf", "moe_stream"]  # unsloth MoE is experimental
 
 
 def test_mixtral_maps_to_mistral_family():

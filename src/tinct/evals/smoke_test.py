@@ -49,11 +49,14 @@ def run_generation_smoke_test(
     eval_report_path: Path,
     prompts: Optional[List[str]] = None,
     max_new_tokens: int = 50,
+    offload_experts: bool = False,
 ) -> bool:
     """Load base model + LoRA adapter and gate generation quality.
 
     Writes an ``eval_report.json`` at ``eval_report_path`` and returns True if
-    every prompt produces non-empty, non-repetitive output.
+    every prompt produces non-empty, non-repetitive output. With
+    ``offload_experts`` (MoE models), the model loads on CPU and experts
+    stream to GPU on demand; offload stats land in the eval report.
     """
     ensure_train_deps()
     import torch
@@ -67,9 +70,21 @@ def run_generation_smoke_test(
 
     # CPU-safe dtype: float32 when no CUDA (float16 fails on CPU).
     torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-    base_model = AutoModelForCausalLM.from_pretrained(
-        model_name, trust_remote_code=True, torch_dtype=torch_dtype, device_map="auto",
-    )
+    streamer = None
+    if offload_experts:
+        # MoE path: CPU load (no full-model VRAM spike) + expert streaming.
+        base_model = AutoModelForCausalLM.from_pretrained(
+            model_name, trust_remote_code=True, torch_dtype=torch_dtype, device_map=None,
+        )
+        from tinct.engine.moe import MoEStreamer
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        streamer = MoEStreamer(base_model, device=device, max_resident_experts=2).prepare()
+        base_model._tinct_streamer = streamer  # keep alive; .stats feeds evidence
+    else:
+        base_model = AutoModelForCausalLM.from_pretrained(
+            model_name, trust_remote_code=True, torch_dtype=torch_dtype, device_map="auto",
+        )
     model = PeftModel.from_pretrained(base_model, str(adapter_path))
     model.eval()
 
@@ -121,6 +136,9 @@ def run_generation_smoke_test(
         "repetitive_responses": repetition_count,
         "details": results,
     }
+    if streamer is not None:
+        # Offload bookkeeping for the evidence bundle.
+        report["offload_stats"] = dict(streamer.stats)
     eval_report_path.parent.mkdir(parents=True, exist_ok=True)
     eval_report_path.write_text(
         json.dumps(report, indent=2), encoding="utf-8"

@@ -55,6 +55,7 @@ def run_certify(
     dataset_path: Path | None = None,
     run_id: str | None = None,
     skip_safety: bool = False,
+    offload_experts: bool = False,
 ) -> int:
     """Certify an externally trained adapter.
 
@@ -153,7 +154,9 @@ def run_certify(
         try:
             from tinct.safety.gates import run_safety_gates_for_run
 
-            safety_gates = run_safety_gates_for_run(base_model, adapter, canaries)
+            safety_gates = run_safety_gates_for_run(
+                base_model, adapter, canaries, offload_experts=offload_experts
+            )
             safety_path = work_dir / "safety_gates.json"
             safety_path.write_text(json.dumps(safety_gates, indent=2), encoding="utf-8")
             failed = [

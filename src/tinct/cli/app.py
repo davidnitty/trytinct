@@ -118,6 +118,11 @@ def train(
         "none", "--accelerator",
         help="Acceleration backend: 'none' or 'unsloth' (low-VRAM, needs tinct[unsloth]).",
     ),
+    offload_experts: bool = typer.Option(
+        False, "--offload-experts",
+        help="Stream MoE expert MLPs from CPU on demand (Mixtral-class models; "
+             "routers/attention stay on GPU). Not combinable with --accelerator unsloth.",
+    ),
 ) -> None:
     """Validate then fine-tune a Llama adapter (LoRA/QLoRA), fail-closed."""
     dataset_path = dataset_opt or dataset
@@ -127,7 +132,8 @@ def train(
     _exit(train_cmd.run_train(project, dataset_path, run, model,
                               method=method, lora_rank_override=lora_rank,
                               max_loss_threshold_override=max_loss_threshold,
-                              accelerator=accelerator))
+                              accelerator=accelerator,
+                              offload_experts=offload_experts))
 
 
 @app.command("eval")
@@ -137,10 +143,15 @@ def evaluate(
     safety: bool = typer.Option(
         False, "--safety", help="Run behavioral certification gates (canary leakage + refusal regression)."
     ),
+    offload_experts: bool = typer.Option(
+        False, "--offload-experts",
+        help="Stream MoE expert MLPs from CPU on demand (Mixtral-class models).",
+    ),
 ) -> None:
     """Gate a trained checkpoint against thresholds."""
     project = _open_project(root)
-    _exit(eval_cmd.run_eval(project, run, safety=safety))
+    _exit(eval_cmd.run_eval(project, run, safety=safety,
+                            offload_experts=offload_experts))
 
 
 @app.command("ship")
@@ -174,11 +185,16 @@ def certify(
     skip_safety: bool = typer.Option(
         False, "--skip-safety", help="Skip behavioral safety gates (canary/refusal/toxicity)."
     ),
+    offload_experts: bool = typer.Option(
+        False, "--offload-experts",
+        help="Stream MoE expert MLPs from CPU on demand (Mixtral-class models).",
+    ),
 ) -> None:
     """Certify an externally trained adapter: eval gates + signed evidence."""
     _exit(certify_cmd.run_certify(adapter, base_model, root, canaries_path=canaries,
                                   dataset_path=dataset, run_id=run_id,
-                                  skip_safety=skip_safety))
+                                  skip_safety=skip_safety,
+                                  offload_experts=offload_experts))
 
 
 # -- preflight ---------------------------------------------------------------

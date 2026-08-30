@@ -105,6 +105,7 @@ def _run_dpo_training(project: Project, doctor: DataDoctor, records, dataset: Pa
         lora_rank=train_cfg.lora_r,
         accelerator=accelerator,
         max_seq_length=train_cfg.max_seq_len,
+        offload_experts=offload_experts,
     )
     _materialize_metrics(run_dir)
 
@@ -137,7 +138,8 @@ def run_train(project: Project, dataset: Path, run_name: str | None,
               model_override: str | None, method: str = "sft",
               lora_rank_override: int | None = None,
               max_loss_threshold_override: float | None = None,
-              accelerator: str = "none") -> int:
+              accelerator: str = "none",
+              offload_experts: bool = False) -> int:
     """Validate, split, train. Returns 0 on success, non-zero otherwise."""
     console = get_console()
 
@@ -150,6 +152,13 @@ def run_train(project: Project, dataset: Path, run_name: str | None,
     # Fail-closed 0b: accelerator must be known.
     if accelerator not in ("none", "unsloth"):
         console.print(f"[bold red]Accelerator {accelerator!r} is not supported. Use 'none' or 'unsloth'.[/]")
+        return 1
+
+    # Fail-closed 0b2: expert offloading and Unsloth are mutually exclusive —
+    # unsloth manages its own expert placement.
+    if offload_experts and accelerator == "unsloth":
+        console.print("[bold red]--offload-experts cannot be combined with "
+                      "--accelerator unsloth (unsloth manages its own placement).[/]")
         return 1
 
     # Fail-closed 0c: verify unsloth is importable BEFORE doing any expensive
@@ -245,6 +254,7 @@ def run_train(project: Project, dataset: Path, run_name: str | None,
             logging_steps=train_cfg.logging_steps,
             max_seq_length=train_cfg.max_seq_len,
             accelerator=accelerator,
+            offload_experts=offload_experts,
         )
     except ImportError as exc:
         console.print(f"[bold red]Cannot train:[/] {escape(str(exc))}")

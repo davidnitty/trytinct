@@ -17,6 +17,8 @@ Last updated: 2026-08
 **Phase 1 (Mixtral vanguard) — landed:**
 - ✅ Expert Collapse safety gate (`safety/moe_gates.py`): forward-hook router
   tracking, <1% utilization → FAIL, runs in `tinct eval --safety` / `tinct certify`
+- ✅ MoE expert-offloading engine (`engine/moe.py`): CPU-resident experts with
+  LRU streaming (`--offload-experts` on train/eval/certify; offload stats in evidence)
 - ✅ Mixtral routes to Mistral `[INST]` template validation (Data Doctor)
 
 ---

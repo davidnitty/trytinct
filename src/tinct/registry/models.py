@@ -44,7 +44,7 @@ MODEL_REGISTRY = {
         "template": "mistral-chat",
         "architecture": "moe",
         "num_experts": 8,
-        "accelerator": ["hf"],  # Unsloth MoE support is experimental
+        "accelerator": ["hf", "moe_stream"],  # unsloth MoE support is experimental
         "safety_gates": ["canary", "refusal", "toxicity", "expert_collapse"],
     },
     # Tier 2: Basic support (template validation only)

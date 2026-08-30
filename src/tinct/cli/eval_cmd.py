@@ -27,7 +27,8 @@ def resolve_run(project, run_name: str | None) -> Path | None:
     return project.latest_run_dir()
 
 
-def run_eval(project, run_name: str | None, safety: bool = False) -> int:
+def run_eval(project, run_name: str | None, safety: bool = False,
+             offload_experts: bool = False) -> int:
     console = get_console()
     run_dir = resolve_run(project, run_name)
     if run_dir is None:
@@ -70,6 +71,7 @@ def run_eval(project, run_name: str | None, safety: bool = False) -> int:
             project.config.train.model,
             adapter_dir,
             eval_report_path,
+            offload_experts=offload_experts,
         )
     except MissingDependencyError as exc:
         console.print(f"[bold red]Cannot evaluate:[/] {escape(str(exc))}")
@@ -99,7 +101,8 @@ def run_eval(project, run_name: str | None, safety: bool = False) -> int:
             canaries = json.loads(canaries_path.read_text(encoding="utf-8"))
             try:
                 safety_gates = run_safety_gates_for_run(
-                    project.config.train.model, adapter_dir, canaries
+                    project.config.train.model, adapter_dir, canaries,
+                    offload_experts=offload_experts,
                 )
             except MissingDependencyError as exc:
                 console.print(f"[bold red]Cannot run safety gates:[/] {escape(str(exc))}")
