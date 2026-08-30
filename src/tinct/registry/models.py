@@ -39,10 +39,12 @@ MODEL_REGISTRY = {
         "safety_gates": ["canary", "refusal", "toxicity"],
     },
     "mistralai/Mixtral-8x7B-Instruct-v0.1": {
-        "family": "mistral",
+        "family": "mistral",  # Mixtral uses Mistral's [INST] template
         "tier": 1,
         "template": "mistral-chat",
-        "accelerator": ["unsloth", "hf"],
+        "architecture": "moe",
+        "num_experts": 8,
+        "accelerator": ["hf"],  # Unsloth MoE support is experimental
         "safety_gates": ["canary", "refusal", "toxicity", "expert_collapse"],
     },
     # Tier 2: Basic support (template validation only)
@@ -98,6 +100,12 @@ def get_model_info(model_name: str) -> dict:
 def is_fully_supported(model_name: str) -> bool:
     """Check if a model has full Tier 1 support."""
     return get_model_info(model_name)["tier"] == 1
+
+
+def is_moe_model(model_name: str) -> bool:
+    """Check if a model is a Mixture of Experts architecture."""
+    info = get_model_info(model_name)
+    return info.get("architecture") == "moe"
 
 
 def get_supported_accelerators(model_name: str) -> list[str]:

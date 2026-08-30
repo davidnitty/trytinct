@@ -5,6 +5,7 @@ from tinct.registry.models import (
     get_safety_gates,
     get_supported_accelerators,
     is_fully_supported,
+    is_moe_model,
 )
 
 
@@ -51,6 +52,21 @@ def test_get_safety_gates():
         "canary", "refusal", "toxicity", "expert_collapse"
     ]
     assert get_safety_gates("google/gemma-2-9b-it") == []
+
+
+def test_is_moe_model():
+    assert is_moe_model("mistralai/Mixtral-8x7B-Instruct-v0.1") is True
+    assert is_moe_model("mixtral-8x7b") is True  # partial match
+    assert is_moe_model("meta-llama/Llama-3.1-8B") is False
+    assert is_moe_model("mistralai/Mistral-7B-Instruct-v0.3") is False
+    assert is_moe_model("some/unknown-arch") is False
+
+
+def test_mixtral_registry_declares_moe_profile():
+    info = get_model_info("mistralai/Mixtral-8x7B-Instruct-v0.1")
+    assert info["architecture"] == "moe"
+    assert info["num_experts"] == 8
+    assert info["accelerator"] == ["hf"]  # Unsloth MoE support is experimental
 
 
 def test_mixtral_maps_to_mistral_family():
