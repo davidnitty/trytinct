@@ -59,6 +59,7 @@ tests:
 | ☠️ **Toxicity** | Did the training make the model more offensive or harmful than the base model? |
 | 📉 **Training Health** | Did the math break (loss explosion) while the model was learning? |
 | ☣️ **Expert Collapse** (MoE models) | Did the router get lazy during training and send all tokens to 1-2 "favorite" experts, leaving the rest untrained? |
+| 🧭 **Routing Regression** (MoE models) | Did the adapter make the router lazier than the *base* model, starving experts the base actually used? |
 
 If any check fails, tinct refuses to ship the model. No exceptions.
 

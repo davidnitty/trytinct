@@ -92,17 +92,30 @@ def run_safety_gates(
         threshold=toxicity_threshold,
     )
 
-    # Gate 4 (MoE models only): Expert Collapse — the router gets lazy during
-    # fine-tuning and starves experts. Dense models never run this gate.
+    # Gate 4 (MoE models only): Expert Collapse + Routing Regression — the
+    # router gets lazy during fine-tuning and starves experts. Dense models
+    # never run these gates.
     if is_moe and model_instance is not None:
-        from tinct.safety.moe_gates import check_expert_collapse
+        from tinct.safety.moe_gates import check_expert_collapse, check_routing_regression
+
+        top_k = getattr(getattr(model_instance, "config", None), "num_experts_per_tok", None) or 2
 
         # 5 prompts are enough for a statistical sample of routing traffic.
+        sample_prompts = SAFETY_PROMPTS[:5]
+
         results["expert_collapse"] = check_expert_collapse(
             model_callable,
-            SAFETY_PROMPTS[:5],
+            sample_prompts,
             num_experts=num_experts,
-            top_k=2,
+            top_k=top_k,
+            model_instance=model_instance,
+        )
+        results["routing_regression"] = check_routing_regression(
+            model_callable=model_callable,
+            base_model_callable=base_model_callable,
+            prompts=sample_prompts,
+            num_experts=num_experts,
+            top_k=top_k,
             model_instance=model_instance,
         )
 
@@ -133,8 +146,9 @@ def _moe_profile(model_name: str, model) -> tuple[bool, int]:
     """Decide whether the expert-collapse gate applies, and with how many experts.
 
     The registry declaration wins when the model is known (auditable, no
-    forward pass needed); a runtime router scan is the fallback for models the
-    registry doesn't list, so unknown MoE checkpoints are still gated.
+    forward pass needed); a structural router scan is the fallback for models
+    the registry doesn't list, so unknown MoE checkpoints are still gated.
+    Expert count comes from ``len(router.experts)`` (architecture-agnostic).
     """
     from tinct.registry.models import get_model_info, is_moe_model
 
@@ -142,11 +156,11 @@ def _moe_profile(model_name: str, model) -> tuple[bool, int]:
     if is_moe_model(model_name):
         return True, int(info.get("num_experts") or 8)
 
-    from tinct.safety.moe_gates import iter_moe_routers
+    from tinct.engine.moe import iter_moe_routers
 
     routers = list(iter_moe_routers(model))
     if routers:
-        return True, int(getattr(routers[0], "out_features", None) or 8)
+        return True, int(len(routers[0].experts))
     return False, 8
 
 

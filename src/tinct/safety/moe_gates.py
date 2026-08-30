@@ -9,26 +9,11 @@ and tallying expert selections during generation.
 """
 
 import logging
-from typing import Callable, Iterator, Tuple
+from typing import Callable
+
+from tinct.engine.moe import iter_moe_routers
 
 log = logging.getLogger(__name__)
-
-# Mixtral names its MoE block "block_sparse_moe" and its router "gate";
-# the router itself is an nn.Linear whose out_features == num_experts.
-_ROUTER_MARKER = "block_sparse_moe"
-
-
-def iter_moe_routers(model) -> Iterator[Tuple[str, object]]:
-    """Yield ``(name, gate_module)`` for every MoE router in ``model``.
-
-    Works for Mixtral-style architectures (``block_sparse_moe.gate``) and is
-    the single scan used both by :class:`MoEExpertTracker` and the pipeline
-    integration in :mod:`tinct.safety.gates`, so gate applicability and hook
-    attachment can never disagree.
-    """
-    for name, module in model.named_modules():
-        if _ROUTER_MARKER in name and hasattr(module, "gate"):
-            yield name, module.gate
 
 
 class MoEExpertTracker:
@@ -64,11 +49,12 @@ class MoEExpertTracker:
     def attach_to_model(self, model):
         """
         Scans the model for MoE router layers and attaches hooks.
-        Works for Mixtral, Qwen-MoE, and similar architectures.
+        Works for Mixtral, Qwen-MoE, DeepSeek, and similar architectures
+        (structural detection — see :func:`tinct.engine.moe.iter_moe_routers`).
         """
         attached_count = 0
-        for _name, gate in iter_moe_routers(model):
-            handle = gate.register_forward_hook(self._hook_fn)
+        for _name, block in iter_moe_routers(model):
+            handle = block.gate.register_forward_hook(self._hook_fn)
             self.hooks.append(handle)
             attached_count += 1
 
@@ -83,6 +69,11 @@ class MoEExpertTracker:
         for handle in self.hooks:
             handle.remove()
         self.hooks.clear()
+
+    def reset(self) -> None:
+        """Zero tallies between measurement passes."""
+        self.expert_counts = [0] * self.num_experts
+        self.total_selections = 0
 
     def check_collapse(self, min_utilization_threshold: float = 0.01) -> dict:
         """
@@ -161,3 +152,74 @@ def check_expert_collapse(
         tracker.detach()
 
     return result
+
+
+def check_routing_regression(
+    model_callable: Callable,          # adapter pass
+    base_model_callable: Callable,     # base pass (disable_adapter)
+    prompts: list,
+    num_experts: int,
+    top_k: int = 2,
+    relative_drop_threshold: float = 0.5,  # expert loses >50% of its base share
+    base_floor: float = 0.02,              # only judge experts base used >=2%
+    model_instance=None,
+) -> dict:
+    """
+    Flags experts the adapter starved relative to the BASE model.
+
+    An expert is 'regressed' only if:
+      - base utilization >= base_floor (base actually used it), AND
+      - adapter utilization < base utilization * (1 - relative_drop_threshold)
+
+    Experts the base already starved are ignored — the adapter isn't blamed
+    for the base model's laziness.
+    """
+    if model_instance is None:
+        return {"status": "NOT_CONFIGURED",
+                "reason": "Raw model instance not provided to MoE gate."}
+
+    tracker = MoEExpertTracker(num_experts=num_experts, top_k=top_k)
+    tracker.attach_to_model(model_instance)
+
+    try:
+        for prompt in prompts:
+            _ = model_callable(prompt)          # adapter pass
+        adapter_counts = list(tracker.expert_counts)
+        adapter_total = tracker.total_selections
+        tracker.reset()
+
+        for prompt in prompts:
+            _ = base_model_callable(prompt)     # base pass
+        base_counts = list(tracker.expert_counts)
+        base_total = tracker.total_selections
+    finally:
+        tracker.detach()
+
+    if adapter_total == 0 or base_total == 0:
+        return {"status": "NOT_CONFIGURED",
+                "reason": "No tokens routed during regression measurement."}
+
+    u_base = [c / base_total for c in base_counts]
+    u_adp = [c / adapter_total for c in adapter_counts]
+
+    regressed = [
+        i for i in range(num_experts)
+        if u_base[i] >= base_floor
+        and u_adp[i] < u_base[i] * (1 - relative_drop_threshold)
+    ]
+
+    ratios = [
+        round(u_adp[i] / u_base[i], 4) if u_base[i] > 0 else None
+        for i in range(num_experts)
+    ]
+
+    return {
+        "status": "FAIL" if regressed else "PASS",
+        "num_experts": num_experts,
+        "regressed_experts": regressed,
+        "base_utilization": [round(u, 4) for u in u_base],
+        "adapter_utilization": [round(u, 4) for u in u_adp],
+        "adapter_over_base_ratio": ratios,
+        "relative_drop_threshold": relative_drop_threshold,
+        "base_floor": base_floor,
+    }

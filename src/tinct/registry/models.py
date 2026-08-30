@@ -45,7 +45,7 @@ MODEL_REGISTRY = {
         "architecture": "moe",
         "num_experts": 8,
         "accelerator": ["hf", "moe_stream"],  # unsloth MoE support is experimental
-        "safety_gates": ["canary", "refusal", "toxicity", "expert_collapse"],
+        "safety_gates": ["canary", "refusal", "toxicity", "expert_collapse", "routing_regression"],
     },
     # Tier 2: Basic support (template validation only)
     "google/gemma-2-9b-it": {

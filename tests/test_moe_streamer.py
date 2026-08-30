@@ -12,7 +12,7 @@ import torch.nn as nn
 
 import pytest
 
-from tinct.engine.moe import MoEStreamer, ExpertLRUCache, iter_moe_experts
+from tinct.engine.moe import MoEStreamer, ExpertLRUCache, iter_moe_experts, iter_moe_routers
 
 
 # -- fake model (Mixtral-exact naming) ------------------------------------------
@@ -71,6 +71,61 @@ class FakeModel(nn.Module):
 _COLLAPSE_BIAS = [9.0, 8.0] + [-100.0] * 6
 
 _NUM_EXPERTS = 16  # 2 layers x 8 experts
+
+
+# -- Qwen-MoE / DeepSeek-style fake (MoE block lives at `<layer>.mlp`) ----------
+
+class _QwenStyleBlock(nn.Module):
+    def __init__(self, n=8):
+        super().__init__()
+        self.gate = nn.Linear(4, n)
+        self.experts = nn.ModuleList([FakeExpert() for _ in range(n)])
+
+
+class _QwenStyleLayer(nn.Module):
+    def __init__(self, n=8):
+        super().__init__()
+        self.mlp = _QwenStyleBlock(n)
+
+
+class _QwenStyleModel(nn.Module):
+    def __init__(self, n=8):
+        super().__init__()
+        self.embed = nn.Linear(4, 4)
+        self.layers = nn.ModuleList([_QwenStyleLayer(n) for _ in range(2)])
+
+
+# -- structural router detection -------------------------------------------------
+
+class TestStructuralDetection:
+    """Router detection is structural (gate + experts), not name-based."""
+
+    def test_mixtral_style_blocks_detected(self):
+        routers = dict(iter_moe_routers(FakeModel()))
+        assert len(routers) == 2
+        assert all(name.endswith("block_sparse_moe") for name in routers)
+        assert all(len(block.experts) == 8 for block in routers.values())
+
+    def test_qwen_style_blocks_detected(self):
+        routers = dict(iter_moe_routers(_QwenStyleModel()))
+        assert len(routers) == 2
+        assert all(name.endswith(".mlp") for name in routers)
+        assert all(len(block.experts) == 8 for block in routers.values())
+
+    def test_expert_paths_are_router_name_agnostic(self):
+        experts = dict(iter_moe_experts(_QwenStyleModel()))
+        assert len(experts) == 16
+        assert "layers.0.mlp.experts.5" in experts
+        assert "layers.1.mlp.experts.0" in experts
+
+    def test_expert_count_matches_declared_list(self):
+        for block in dict(iter_moe_routers(FakeModel())).values():
+            assert len(block.experts) == len(list(block.experts)) == 8
+
+    def test_dense_model_has_no_routers_or_experts(self):
+        dense = nn.Linear(4, 4)
+        assert list(iter_moe_routers(dense)) == []
+        assert dict(iter_moe_experts(dense)) == {}
 
 
 # -- ExpertLRUCache (pure bookkeeping) -------------------------------------------

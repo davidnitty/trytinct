@@ -17,8 +17,13 @@ Last updated: 2026-08
 **Phase 1 (Mixtral vanguard) — landed:**
 - ✅ Expert Collapse safety gate (`safety/moe_gates.py`): forward-hook router
   tracking, <1% utilization → FAIL, runs in `tinct eval --safety` / `tinct certify`
+- ✅ Routing Regression gate: adapter vs base utilization comparison
+  (>50% relative drop on experts the base used ≥2% → FAIL) — base-model
+  laziness is never blamed on the adapter
 - ✅ MoE expert-offloading engine (`engine/moe.py`): CPU-resident experts with
   LRU streaming (`--offload-experts` on train/eval/certify; offload stats in evidence)
+- ✅ Structural router detection (gate + experts, no name regexes) — covers
+  Mixtral, Qwen-MoE, DeepSeek, and future families
 - ✅ Mixtral routes to Mistral `[INST]` template validation (Data Doctor)
 
 ---

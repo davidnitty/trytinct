@@ -24,20 +24,35 @@ Design principles:
 """
 
 import logging
-import re
 from typing import Iterator
 
 log = logging.getLogger(__name__)
 
-# Mixtral naming. Phase 2 extends this (Qwen-MoE/DeepSeek use mlp.gate etc.)
-_EXPERT_RE = re.compile(r"block_sparse_moe\.experts\.\d+$")
 
+def iter_moe_routers(model) -> Iterator[tuple[str, object]]:
+    """
+    Yields (path, block) for every MoE routing block, architecture-agnostic.
 
-def iter_moe_experts(model) -> Iterator[tuple[str, "torch.nn.Module"]]:
-    """Yields (path, module) for every expert MLP in the model."""
+    Structural definition: a module exposing both a router ('gate') and a
+    list of expert submodules ('experts'). Matches Mixtral
+    (block_sparse_moe), Qwen-MoE / DeepSeek / Phi-MoE (mlp), and future
+    families without name regexes.
+    """
     for name, module in model.named_modules():
-        if _EXPERT_RE.search(name):
+        if (
+            hasattr(module, "gate")
+            and hasattr(module, "experts")
+            and hasattr(module.experts, "__len__")
+            and hasattr(module.experts, "__getitem__")
+        ):
             yield name, module
+
+
+def iter_moe_experts(model) -> Iterator[tuple[str, object]]:
+    """Yields (path, expert) for every routed expert MLP in the model."""
+    for router_name, router in iter_moe_routers(model):
+        for i, expert in enumerate(router.experts):
+            yield f"{router_name}.experts.{i}", expert
 
 
 class ExpertLRUCache:
