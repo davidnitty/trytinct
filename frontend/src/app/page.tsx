@@ -65,7 +65,7 @@ export default function Home() {
               <Button size="lg" className="bg-emerald-500 hover:bg-emerald-600 text-black font-semibold gap-2">
                 Get Started <ArrowRight className="w-4 h-4" />
               </Button>
-              <Button size="lg" variant="outline" className="border-white/20 text-white hover:bg-white/10">
+              <Button size="lg" variant="outline" className="border-white/20 bg-transparent text-white hover:bg-white/10">
                 View Demo Dashboard
               </Button>
             </div>
