@@ -6,9 +6,11 @@
 //   json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 // over the 13 unsigned fields (everything except `signature`), with the same
 // from_dict defaults for bundles written by older tinct versions.
-import { createPublicKey, verify as verifySignature } from "node:crypto"
+import { createHash, createPublicKey, verify as verifySignature } from "node:crypto"
 import { readFile, readdir, stat } from "node:fs/promises"
 import path from "node:path"
+
+import { classifyKey } from "@/lib/tinct/trustStore"
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -86,16 +88,38 @@ function canonicalBytes(rawLit: Record<string, any>): Buffer {
   return Buffer.from(canonicalJson(payload), "utf-8")
 }
 
-/** Verify the bundle's embedded Ed25519 signature over its canonical bytes. */
-export function verifyBundle(rawLit: Record<string, any>): boolean {
+export interface VerificationOutcome {
+  /** The Ed25519 math checks out over the bundle's canonical bytes. */
+  signatureValid: boolean
+  /** The embedded public key is pinned in the trust store. */
+  trusted: boolean
+  trustLabel?: string
+  keyFingerprint: string | null
+}
+
+/**
+ * Verify the bundle's signature (with the embedded key — this only proves the
+ * bundle wasn't modified after signing) AND classify the issuer against the
+ * trust store. Both must pass before a bundle may be displayed as verified.
+ */
+export async function verifyBundle(rawLit: Record<string, any>): Promise<VerificationOutcome> {
   const sig = rawLit.signature
-  if (!sig?.public_key_pem || !sig?.value || sig?.alg !== "ed25519") return false
+  if (!sig?.public_key_pem || !sig?.value || sig?.alg !== "ed25519") {
+    return { signatureValid: false, trusted: false, keyFingerprint: null }
+  }
+  let signatureValid = false
   try {
     const publicKey = createPublicKey(sig.public_key_pem)
-    const signature = Buffer.from(sig.value, "hex")
-    return verifySignature(null, canonicalBytes(rawLit), publicKey, signature)
+    signatureValid = verifySignature(null, canonicalBytes(rawLit), publicKey, Buffer.from(sig.value, "hex"))
   } catch {
-    return false
+    signatureValid = false
+  }
+  const trust = await classifyKey(sig.public_key_pem)
+  return {
+    signatureValid,
+    trusted: trust.trusted,
+    trustLabel: trust.label,
+    keyFingerprint: trust.fingerprint,
   }
 }
 
@@ -172,4 +196,26 @@ export async function findLatestBundle(): Promise<EvidenceBundle | null> {
   }
 
   return latest
+}
+
+/** Find a specific bundle by its run name (`<name>_evidence.json`). */
+export async function findBundleByName(name: string): Promise<EvidenceBundle | null> {
+  if (!/^[A-Za-z0-9._-]+$/.test(name)) return null // no traversal
+  const dirs = await findEvidenceDirs()
+  for (const dir of dirs) {
+    const fullPath = path.join(dir, `${name}_evidence.json`)
+    const text = await readFile(fullPath, "utf-8").catch(() => null)
+    if (text === null) continue
+    try {
+      return {
+        name,
+        path: fullPath,
+        raw: JSON.parse(text),
+        rawLit: parseKeepingNumberLiterals(text),
+      }
+    } catch {
+      return null
+    }
+  }
+  return null
 }

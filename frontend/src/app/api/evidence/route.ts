@@ -1,6 +1,7 @@
 // GET /api/evidence — download the latest signed evidence bundle.
-// Fail-closed: the bundle's Ed25519 signature is verified server-side before
-// it is served; a tampered bundle is never downloadable from the dashboard.
+// Fail-closed twice over: the Ed25519 signature must verify, AND the issuing
+// key must be pinned in the trust store. Tampered → 409; valid math but
+// untrusted issuer → 403.
 import { readFile } from "node:fs/promises"
 
 import { findLatestBundle, verifyBundle } from "@/lib/tinct/evidence"
@@ -15,10 +16,21 @@ export async function GET() {
       { status: 404 },
     )
   }
-  if (!verifyBundle(bundle.rawLit)) {
+
+  const verification = await verifyBundle(bundle.rawLit)
+  if (!verification.signatureValid) {
     return Response.json(
       { error: "signature verification failed — bundle may be tampered with" },
       { status: 409 },
+    )
+  }
+  if (!verification.trusted) {
+    return Response.json(
+      {
+        error:
+          "issuer key is not in the trust store — refusing to serve (signature was mathematically valid, but the signer is unknown)",
+      },
+      { status: 403 },
     )
   }
 

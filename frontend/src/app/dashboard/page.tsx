@@ -8,9 +8,10 @@ import { buttonVariants } from "@/components/ui/button"
 import {
   ShieldCheck, Ghost, MessageSquareOff, Biohazard, BrainCircuit, HardDrive,
   ArrowLeft, CheckCircle2, XCircle, Cpu, Zap, FolderOpen, ShieldAlert, FlaskConical,
+  TriangleAlert, KeyRound,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts"
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from "recharts"
 import type { DashboardData, GateView } from "@/lib/tinct/dashboardData"
 
 const GATE_ICONS: Record<string, LucideIcon> = {
@@ -32,8 +33,12 @@ export default function DashboardPage() {
   const [state, setState] = useState<LoadState>({ status: "loading" })
 
   useEffect(() => {
-    const mock = new URLSearchParams(window.location.search).get("mock") === "1"
-    fetch(`/api/evidence/latest${mock ? "?mock=1" : ""}`)
+    const params = new URLSearchParams(window.location.search)
+    const extras: string[] = []
+    if (params.get("mock") === "1") extras.push("mock=1")
+    const run = params.get("run")
+    if (run) extras.push(`run=${encodeURIComponent(run)}`)
+    fetch(`/api/evidence/latest${extras.length ? `?${extras.join("&")}` : ""}`)
       .then(async (res) => {
         const body = await res.json()
         if (res.ok) {
@@ -192,12 +197,14 @@ function Report({ data }: { data: DashboardData }) {
               <Badge variant="outline" className="gap-1 border-amber-400/50 bg-amber-400/10 text-amber-300">
                 <FlaskConical className="w-3 h-3" /> MOCK DATA
               </Badge>
+            ) : data.verified ? (
+              <Badge variant="outline" className="gap-1 border-emerald-400/50 bg-emerald-400/10 text-emerald-300">
+                <ShieldCheck className="w-3 h-3" /> Ed25519 VERIFIED
+              </Badge>
             ) : (
-              data.verified && (
-                <Badge variant="outline" className="gap-1 border-emerald-400/50 bg-emerald-400/10 text-emerald-300">
-                  <ShieldCheck className="w-3 h-3" /> Ed25519 VERIFIED
-                </Badge>
-              )
+              <Badge variant="outline" className="gap-1 border-amber-400/50 bg-amber-400/10 text-amber-300">
+                <KeyRound className="w-3 h-3" /> MATH VALID, BUT UNTRUSTED ISSUER
+              </Badge>
             )}
           </div>
           <p className="text-gray-400 text-lg">
@@ -220,6 +227,16 @@ function Report({ data }: { data: DashboardData }) {
           </div>
         </div>
       </section>
+
+      {/* Root-cause banner — right below the stamp, before the gate grid. */}
+      {data.failedGateCount > 0 && (
+        <section className="-mt-4">
+          <div className="flex items-start gap-3 bg-red-500/10 border border-red-500/30 rounded-lg px-5 py-4">
+            <TriangleAlert className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+            <p className="text-sm text-red-200 leading-relaxed">{data.rootCause}</p>
+          </div>
+        </section>
+      )}
 
       {/* 2. The 6 Gates Grid */}
       <section>
@@ -247,13 +264,14 @@ function Report({ data }: { data: DashboardData }) {
                   <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
                   <XAxis dataKey="expert" stroke="#71717a" fontSize={12} />
                   <YAxis stroke="#71717a" fontSize={12} unit="%" />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: "8px" }}
-                    labelStyle={{ color: "#fff" }}
-                  />
+                  <Tooltip content={<RoutingTooltip starved={data.starvedExperts} thresholdPct={data.utilizationThresholdPct} />} />
                   <Legend />
                   <Bar dataKey="base" fill="#71717a" name="Base Model" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="adapter" fill="#10b981" name="Adapter" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="adapter" fill="#10b981" name="Adapter" radius={[4, 4, 0, 0]}>
+                    {data.expertRouting.map((_, i) => (
+                      <Cell key={i} fill={data.starvedExperts.includes(i) ? "#ef4444" : "#10b981"} />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             ) : (
@@ -293,17 +311,30 @@ function Report({ data }: { data: DashboardData }) {
             </h3>
             <p className="text-sm text-gray-400 mt-1">
               {data.source === "live"
-                ? "This report is signed with Ed25519 and verified server-side. Tamper-proof and verifiable."
+                ? data.trusted
+                  ? "Signed with Ed25519 and verified against the pinned issuer key. Tamper-proof and verifiable."
+                  : "Signature is mathematically valid, but the issuer key is not pinned in the trust store."
                 : "This is mock demo data — no signed bundle exists on disk."}
             </p>
+            {data.source === "live" && data.keyFingerprint && (
+              <p className="text-xs text-gray-600 font-mono mt-1">
+                issuer key sha256: {data.keyFingerprint.slice(0, 24)}…
+              </p>
+            )}
           </div>
           {data.source === "live" ? (
-            <a
-              href="/api/evidence"
-              className={buttonVariants({ variant: "outline" }) + " border-white/20 bg-transparent text-white hover:bg-white/10"}
-            >
-              Download evidence.json
-            </a>
+            data.trusted ? (
+              <a
+                href="/api/evidence"
+                className={buttonVariants({ variant: "outline" }) + " border-white/20 bg-transparent text-white hover:bg-white/10"}
+              >
+                Download evidence.json
+              </a>
+            ) : (
+              <span className="text-sm text-amber-300 flex items-center gap-2">
+                <ShieldAlert className="w-4 h-4" /> download disabled — untrusted issuer
+              </span>
+            )
           ) : (
             <span className="font-mono text-xs text-gray-500">no bundle on disk</span>
           )}
@@ -314,6 +345,33 @@ function Report({ data }: { data: DashboardData }) {
 }
 
 /* ------------------------------------------------------------ subcomponents */
+
+function RoutingTooltip({ active, payload, label, starved, thresholdPct }: {
+  active?: boolean
+  payload?: any[]
+  label?: string
+  starved: number[]
+  thresholdPct: number | null
+}) {
+  if (!active || !payload?.length) return null
+  const idx = Number(String(label ?? "").replace("Expert ", ""))
+  const isStarved = starved.includes(idx)
+  return (
+    <div className="bg-zinc-900 border border-white/10 rounded-lg px-3 py-2 text-xs shadow-xl">
+      <p className="text-white font-medium mb-1">{label}</p>
+      {payload.map((p: any) => (
+        <p key={p.dataKey} style={{ color: p.color }}>
+          {p.name}: {p.value}%
+        </p>
+      ))}
+      {isStarved && (
+        <p className="text-red-400 mt-1">
+          ⚠ Below the {thresholdPct ?? 1}% minimum utilization threshold.
+        </p>
+      )}
+    </div>
+  )
+}
 
 function GateCard({ gate }: { gate: GateView }) {
   const Icon = GATE_ICONS[gate.key] ?? ShieldCheck
@@ -336,6 +394,11 @@ function GateCard({ gate }: { gate: GateView }) {
       </CardHeader>
       <CardContent>
         <p className="text-2xl font-bold text-white font-mono">{gate.detail}</p>
+        {gate.reason && (
+          <p className="mt-3 text-sm text-red-400 border-t border-red-500/20 pt-3 leading-relaxed">
+            {gate.reason}
+          </p>
+        )}
       </CardContent>
     </Card>
   )

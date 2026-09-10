@@ -1,0 +1,4 @@
+{
+  "_readme": "Maps a project/issuer label to its pinned Ed25519 public key. Values may be raw 64-char hex, a PEM, or an ssh-ed25519 line. Bundles signed by keys not listed here render with an 'untrusted issuer' warning and cannot be downloaded. (Keys with invalid formats are silently skipped.)",
+  "demo-cert": "0f46d497357efa8c380d4806b0c104e33e184ddf19f57a612ab3e994ba56aa27"
+}

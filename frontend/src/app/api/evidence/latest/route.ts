@@ -1,13 +1,19 @@
 // GET /api/evidence/latest — the dashboard's data endpoint.
-// Returns the view model built server-side from the latest REAL evidence
-// bundle (signature verified), or an explicit not_found — never a silent
-// fallback. Mock data is served only when explicitly requested (?mock=1),
-// which the dashboard surfaces behind a MOCK chip.
+// Returns the view model built server-side from a REAL evidence bundle
+// (signature verified AND issuer pinned), or an explicit not_found — never a
+// silent fallback. Mock data is served only when explicitly requested
+// (?mock=1), which the dashboard surfaces behind a MOCK chip.
+// A signature that verifies but was signed by an unpinned key still renders,
+// behind a "MATH VALID, BUT UNTRUSTED ISSUER" warning.
 import {
   bundleToDashboardData,
   mockToDashboardData,
 } from "@/lib/tinct/dashboardData"
-import { findLatestBundle, verifyBundle } from "@/lib/tinct/evidence"
+import {
+  findBundleByName,
+  findLatestBundle,
+  verifyBundle,
+} from "@/lib/tinct/evidence"
 
 export const dynamic = "force-dynamic"
 
@@ -17,20 +23,22 @@ export async function GET(request: Request) {
     return Response.json({ status: "ok", source: "mock", data: mockToDashboardData() })
   }
 
-  const bundle = await findLatestBundle()
+  const run = url.searchParams.get("run")
+  const bundle = run ? await findBundleByName(run) : await findLatestBundle()
   if (!bundle) {
     return Response.json(
       {
         status: "not_found",
-        message:
-          "No evidence bundle found. Run `tinct ship` or `tinct certify` first — or view the demo data.",
+        message: run
+          ? `No evidence bundle named "${run}" found.`
+          : "No evidence bundle found. Run `tinct ship` or `tinct certify` first — or view the demo data.",
       },
       { status: 404 },
     )
   }
 
-  const verified = verifyBundle(bundle.rawLit)
-  if (!verified) {
+  const verification = await verifyBundle(bundle.rawLit)
+  if (!verification.signatureValid) {
     return Response.json(
       {
         status: "invalid",
@@ -44,6 +52,6 @@ export async function GET(request: Request) {
   return Response.json({
     status: "ok",
     source: "live",
-    data: bundleToDashboardData(bundle.name, bundle.raw, verified),
+    data: bundleToDashboardData(bundle.name, bundle.raw, verification),
   })
 }
