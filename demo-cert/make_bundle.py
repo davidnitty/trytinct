@@ -5,6 +5,11 @@
 #   python make_bundle.py             -> the SHIP bundle (all gates PASS)
 #   python make_bundle.py --failing   -> a DON'T_SHIP bundle (toxicity spike +
 #                                        expert 4 starved) for the forensic view
+#   python make_bundle.py --rogue     -> a FORGED SHIP bundle signed by an
+#                                        unpinned key (security demo: the math
+#                                        verifies, the issuer is untrusted)
+#   python make_bundle.py --restore   -> make the trusted SHIP bundle "latest" again
+import os
 import sys
 from pathlib import Path
 
@@ -14,6 +19,8 @@ from tinct.security.signing import SigningKey
 PROJECT = Path(__file__).parent
 KEYS = PROJECT / ".tinct" / "keys"
 EVIDENCE = PROJECT / ".tinct" / "evidence"
+SHIP_RUN = "cert_20260904_143022"
+ROGUE_RUN = "cert_20260905_120000_rogue"
 
 
 def load_or_create_key() -> SigningKey:
@@ -21,6 +28,16 @@ def load_or_create_key() -> SigningKey:
     if key_path.is_file():
         return SigningKey.load(KEYS, "default")
     key = SigningKey.generate("default")
+    key.save(KEYS)
+    return key
+
+
+def load_or_create_rogue_key() -> SigningKey:
+    """A separate, deliberately UNPINNED key — the 'attacker' identity."""
+    key_path = KEYS / "rogue_private.pem"
+    if key_path.is_file():
+        return SigningKey.load(KEYS, "rogue")
+    key = SigningKey.generate("rogue")
     key.save(KEYS)
     return key
 
@@ -133,9 +150,10 @@ def failing_gates() -> dict:
     }
 
 
-def write_bundle(key: SigningKey, run_name: str, gates: dict, decision: str) -> Path:
+def write_bundle(key: SigningKey, run_name: str, gates: dict, decision: str,
+                 project: str = "demo-cert") -> Path:
     report = EvidenceReport(
-        project_name="demo-cert",
+        project_name=project,
         model="mistralai/Mixtral-8x7B-Instruct-v0.1",
         family="mistral",
         decision=decision,
@@ -166,6 +184,28 @@ def write_bundle(key: SigningKey, run_name: str, gates: dict, decision: str) -> 
 
 
 if __name__ == "__main__":
+    if "--restore" in sys.argv:
+        good = EVIDENCE / f"{SHIP_RUN}_evidence.json"
+        if good.is_file():
+            os.utime(good)  # newest mtime -> selected as "latest"
+            print(f"Restored: {good.name} is newest — the dashboard shows the trusted run.")
+        else:
+            print("No SHIP bundle found; run `python make_bundle.py` first.")
+        sys.exit(0)
+
+    if "--rogue" in sys.argv:
+        rogue = load_or_create_rogue_key()
+        write_bundle(rogue, ROGUE_RUN, passing_gates(), "SHIP", project="rogue-cert")
+        print()
+        print("  ROGUE BUNDLE — security demo only.")
+        print("  Signed by an UNPINNED key with a FORGED 'SHIP' verdict: the Ed25519")
+        print("  math verifies, but the dashboard must show 'UNTRUSTED ISSUER' and")
+        print("  refuse the download (403).")
+        print("  Back to the trusted run:  python demo-cert/make_bundle.py --restore")
+        sys.exit(0)
+
     key = load_or_create_key()
     if "--failing" in sys.argv:
         write_bundle(key, "cert_20260904_160000_failing", failing_gates(), "DON'T_SHIP")
+    else:
+        write_bundle(key, SHIP_RUN, passing_gates(), "SHIP")

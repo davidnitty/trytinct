@@ -1,36 +1,92 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# tinct dashboard
 
-## Getting Started
-
-First, run the development server:
+The visualization layer for [tinct](../README.md) — it reads signed certification
+evidence bundles from disk and renders verdicts, safety gates, MoE routing, and
+expert-offloading telemetry. No data leaves the machine: the Next.js server reads
+`.tinct/evidence/*.json` locally and serves a view model to the browser.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev     # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## How data flows
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+.tinct/evidence/<run>_evidence.json
+        │
+        ▼
+/api/evidence/latest     ← verifies Ed25519 signature + issuer trust, maps to view model
+/api/evidence            ← downloads the raw bundle (only if verified AND trusted)
+        │
+        ▼
+/dashboard               ← client fetch, skeleton, explicit empty/error states
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Evidence discovery order: `TINCT_EVIDENCE_DIR`, then `.tinct/evidence` in the app
+directory or any parent, then sibling project directories one level up. The newest
+bundle (by mtime) wins; `?run=<name>` selects a specific one.
 
-## Learn More
+## Trust model
 
-To learn more about Next.js, take a look at the following resources:
+Verifying a signature against the key *embedded in the bundle* only proves the file
+wasn't modified after signing — it says nothing about **who** signed it. An attacker
+can tamper with a verdict and re-sign with their own key; the math verifies.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+`trusted_keys.json` pins acceptable issuers. Bundles from unpinned keys render with an
+amber **UNTRUSTED ISSUER** chip and their download is refused with `403`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```json
+{
+  "my_project": "0f46d497357efa8c380d4806b0c104e33e184ddf19f57a612ab3e994ba56aa27"
+}
+```
 
-## Deploy on Vercel
+Pin encodings accepted (all normalized to a SHA-256 fingerprint of the raw 32-byte key):
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+| Format | Example |
+|---|---|
+| raw hex | `0f46d497...56aa27` |
+| base64 SPKI DER | `MCowBQYDK2VwAyEAD0bUlzV++ow4...` |
+| ssh-ed25519 line | `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5...` |
+| PEM block | `-----BEGIN PUBLIC KEY-----...` |
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+For production, prefer the `TRUSTED_PUBLIC_KEYS` environment variable
+(comma-separated, set at deploy time) over the JSON file — a runtime-writable trust
+file is itself an attack surface.
+
+Status codes: `200` verified · `404` no bundle · `403` untrusted issuer · `409`
+signature invalid (tampered).
+
+## Demo walkthrough
+
+Generate real signed bundles with tinct's own signer (requires the repo venv; writes
+to `demo-cert/.tinct/`, which is git-ignored):
+
+```bash
+# The happy path: a signed SHIP verdict from a pinned issuer
+python demo-cert/make_bundle.py
+
+# Forensic view: DON'T SHIP with a toxicity spike and starved experts
+python demo-cert/make_bundle.py --failing
+# then open http://localhost:3000/dashboard?run=cert_20260904_160000_failing
+
+# Security demo: a FORGED SHIP verdict signed by an unpinned key.
+# The dashboard verifies the math, then flags UNTRUSTED ISSUER and
+# refuses the download.
+python demo-cert/make_bundle.py --rogue
+
+# Make the trusted SHIP bundle the newest one again
+python demo-cert/make_bundle.py --restore
+```
+
+Mock scenarios need no bundle on disk — they are always served behind a **MOCK DATA**
+chip and never silently substitute for real evidence:
+
+- `/dashboard?mock=1` — passing run
+- `/dashboard?mock=fail` — failing run (red banner, failed gates first, red bars)
+
+## Stack
+
+Next.js (App Router) · TypeScript · Tailwind CSS v4 · shadcn/ui · Recharts ·
+Node `crypto` for Ed25519 verification (server-side only).
