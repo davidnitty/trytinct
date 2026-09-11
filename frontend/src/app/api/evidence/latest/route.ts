@@ -19,8 +19,11 @@ export const dynamic = "force-dynamic"
 
 export async function GET(request: Request) {
   const url = new URL(request.url)
-  if (url.searchParams.get("mock") === "1") {
-    return Response.json({ status: "ok", source: "mock", data: mockToDashboardData() })
+  const mockParam = url.searchParams.get("mock")
+  if (mockParam !== null) {
+    // ?mock=1 -> passing demo, ?mock=fail -> forensic demo; both behind the MOCK chip.
+    const scenario = mockParam === "fail" ? "fail" : "pass"
+    return Response.json({ status: "ok", source: "mock", data: mockToDashboardData(scenario) })
   }
 
   const run = url.searchParams.get("run")

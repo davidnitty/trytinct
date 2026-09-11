@@ -1,7 +1,7 @@
 // Dashboard view model — one shape for both real evidence bundles and the
 // mock demo run, so the dashboard component never knows the difference.
 // Mapping happens server-side only; the client just renders.
-import { mockRunData } from "@/lib/mockData"
+import { mockFailData, mockRunData } from "@/lib/mockData"
 
 export type GateStatus = "PASS" | "FAIL" | "NOT RUN"
 
@@ -66,6 +66,9 @@ const ADVICE: Record<string, string> = {
 
 function failureReason(key: string, g: any): string | undefined {
   if (g?.status !== "FAIL") return undefined
+  // A bundle-provided failure_reason (if tinct ever emits one) wins over the
+  // client-side synthesis.
+  if (typeof g.failure_reason === "string" && g.failure_reason.length > 0) return g.failure_reason
   switch (key) {
     case "canary_leakage":
       return `${g.canaries_leaked} of ${g.canaries_tested} canaries leaked (${(g.leakage_rate * 100).toFixed(1)}%).`
@@ -83,7 +86,9 @@ function failureReason(key: string, g: any): string | undefined {
 }
 
 function buildGates(g: any): GateView[] {
-  const offload = g.offload_stats
+  // Live bundles expose the streamer stats as `offload_stats`; the mock runs
+  // shape them as a `memory_offload` gate. Accept either.
+  const offload = g.offload_stats ?? g.memory_offload
   const gates: GateView[] = [
     {
       key: "canary_leakage",
@@ -123,8 +128,8 @@ function buildGates(g: any): GateView[] {
     {
       key: "memory_offload",
       title: GATE_TITLES.memory_offload,
-      status: offload ? "PASS" : "NOT RUN",
-      detail: offload ? `${offload.cache_hits} cache hits` : "—",
+      status: g.memory_offload?.status ?? (offload ? "PASS" : "NOT RUN"),
+      detail: offload?.cache_hits != null ? `${offload.cache_hits} cache hits` : "—",
     },
   ]
   // FAILED gates float to the top — forensic view first.
@@ -139,16 +144,28 @@ function toGb(bytes: number): number {
   return Math.round((bytes / 1024 / 1024 / 1024) * 10) / 10
 }
 
-function summarizeFailures(gates: GateView[]): { failedGateCount: number; rootCause: string; starvedExperts: number[] } {
+function summarizeFailures(gates: GateView[]): { failedGateCount: number; rootCause: string } {
   const failed = gates.filter((gate) => gate.status === "FAIL")
   const advice = [...new Set(failed.map((gate) => ADVICE[gate.key]).filter(Boolean))]
   return {
     failedGateCount: failed.length,
-    rootCause: failed.length
-      ? `Certification failed on ${failed.length} of ${gates.length} gates. ${advice.join(", and ")}.`
-      : "",
-    starvedExperts: [],
+    rootCause: failed.length ? `${advice.join(", and ")}.` : "",
   }
+}
+
+/**
+ * Expert indices the gates flagged as starved: a collapsed router names its
+ * laziest expert, the regression gate names everything it starved vs base.
+ */
+function deriveStarved(g: any): number[] {
+  return [
+    ...new Set([
+      ...(g.expert_collapse?.status === "FAIL" && typeof g.expert_collapse.laziest_expert_id === "number"
+        ? [g.expert_collapse.laziest_expert_id]
+        : []),
+      ...((g.routing_regression?.status === "FAIL" ? g.routing_regression.regressed_experts : []) ?? []),
+    ]),
+  ]
 }
 
 /** Map a verified (or at least parsed) evidence bundle to the view model. */
@@ -173,17 +190,6 @@ export function bundleToDashboardData(
   const gateViews = buildGates(gates)
   const { failedGateCount, rootCause } = summarizeFailures(gateViews)
 
-  // Experts to paint red: a collapsed router names its laziest expert, the
-  // regression gate names everything it starved vs base.
-  const starvedExperts = [
-    ...new Set([
-      ...(collapse?.status === "FAIL" && typeof collapse.laziest_expert_id === "number"
-        ? [collapse.laziest_expert_id]
-        : []),
-      ...((routing?.status === "FAIL" ? routing.regressed_experts : []) ?? []),
-    ]),
-  ]
-
   return {
     source: "live",
     verified: verification.signatureValid && verification.trusted,
@@ -207,36 +213,56 @@ export function bundleToDashboardData(
     },
     failedGateCount,
     rootCause,
-    starvedExperts,
+    starvedExperts: deriveStarved(gates),
     utilizationThresholdPct: collapse?.threshold != null ? collapse.threshold * 100 : null,
   }
 }
 
-/** The mock demo run, passed through the exact same view model. */
-export function mockToDashboardData(): DashboardData {
-  const { gates, offloadStats, ...rest } = mockRunData
+/**
+ * The mock demo run, passed through the exact same view model. Two scenarios:
+ * "pass" (all gates green) and "fail" (toxicity spike + experts 6/7 starved),
+ * both served only behind the MOCK chip.
+ */
+export function mockToDashboardData(scenario: "pass" | "fail" = "pass"): DashboardData {
+  const raw = (scenario === "fail" ? mockFailData : mockRunData) as Record<string, any>
+  const gates = raw.gates
+  const offload = gates.memory_offload
   const gateViews = buildGates(gates)
   const { failedGateCount, rootCause } = summarizeFailures(gateViews)
+
+  // Per-point flags from the mock's routing table, unioned with the gate-derived set.
+  const flagged = (raw.expertRouting ?? [])
+    .map((entry: any, i: number) => (entry.regressed ? i : -1))
+    .filter((i: number) => i >= 0)
+
   return {
-    ...rest,
     source: "mock",
     verified: false,
     trusted: false,
     keyFingerprint: null,
-    verdict: mockRunData.verdict === "SHIP" ? "SHIP" : "DON'T SHIP",
+    runId: raw.runId,
+    baseModel: raw.baseModel,
+    adapter: raw.adapter,
+    verdict: raw.verdict === "SHIP" ? "SHIP" : "DON'T SHIP",
+    timestamp: raw.timestamp,
     trainingTool: "unsloth",
     gates: gateViews,
+    expertRouting: (raw.expertRouting ?? []).map((entry: any) => ({
+      expert: entry.expert,
+      base: entry.base,
+      adapter: entry.adapter,
+    })),
     offloadStats: {
-      cacheHits: gates.memory_offload.cache_hits,
-      h2dStreams: gates.memory_offload.h2d_streams,
-      d2hEvictions: gates.memory_offload.d2h_evictions,
-      bytesH2dGb: toGb(offloadStats.bytes_h2d),
-      bytesD2hGb: toGb(offloadStats.bytes_d2h),
-      vramSavedGb: offloadStats.vram_saved_gb,
+      cacheHits: offload?.cache_hits ?? 0,
+      h2dStreams: offload?.h2d_streams ?? 0,
+      d2hEvictions: offload?.d2h_evictions ?? 0,
+      bytesH2dGb: toGb(raw.offloadStats?.bytes_h2d ?? 0),
+      bytesD2hGb: toGb(raw.offloadStats?.bytes_d2h ?? 0),
+      vramSavedGb: raw.offloadStats?.vram_saved_gb ?? null,
     },
     failedGateCount,
     rootCause,
-    starvedExperts: [],
+    starvedExperts: [...new Set([...deriveStarved(gates), ...flagged])],
     utilizationThresholdPct: gates.expert_collapse?.threshold != null ? gates.expert_collapse.threshold * 100 : null,
   }
 }

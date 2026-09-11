@@ -8,7 +8,7 @@ import { buttonVariants } from "@/components/ui/button"
 import {
   ShieldCheck, Ghost, MessageSquareOff, Biohazard, BrainCircuit, HardDrive,
   ArrowLeft, CheckCircle2, XCircle, Cpu, Zap, FolderOpen, ShieldAlert, FlaskConical,
-  TriangleAlert, KeyRound,
+  TriangleAlert, KeyRound, Download,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from "recharts"
@@ -35,7 +35,8 @@ export default function DashboardPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const extras: string[] = []
-    if (params.get("mock") === "1") extras.push("mock=1")
+    const mock = params.get("mock")
+    if (mock !== null) extras.push(`mock=${encodeURIComponent(mock)}`)
     const run = params.get("run")
     if (run) extras.push(`run=${encodeURIComponent(run)}`)
     fetch(`/api/evidence/latest${extras.length ? `?${extras.join("&")}` : ""}`)
@@ -68,9 +69,19 @@ export default function DashboardPage() {
             </div>
           </div>
           {state.status === "ready" ? (
-            <Badge variant="outline" className="h-6 border-white/20 bg-white/5 font-mono text-xs text-gray-300">
-              {state.data.runId}
-            </Badge>
+            <div className="flex items-center gap-3">
+              {state.data.source === "mock" && (
+                <Link
+                  href={state.data.verdict === "SHIP" ? "/dashboard?mock=fail" : "/dashboard?mock=1"}
+                  className={buttonVariants({ variant: "ghost", size: "sm" })}
+                >
+                  Toggle demo: {state.data.verdict === "SHIP" ? "FAIL" : "PASS"}
+                </Link>
+              )}
+              <Badge variant="outline" className="h-6 border-white/20 bg-white/5 font-mono text-xs text-gray-300">
+                {state.data.runId}
+              </Badge>
+            </div>
           ) : (
             <div className="h-5 w-40 animate-pulse rounded-full bg-white/10" />
           )}
@@ -231,9 +242,17 @@ function Report({ data }: { data: DashboardData }) {
       {/* Root-cause banner — right below the stamp, before the gate grid. */}
       {data.failedGateCount > 0 && (
         <section className="-mt-4">
-          <div className="flex items-start gap-3 bg-red-500/10 border border-red-500/30 rounded-lg px-5 py-4">
-            <TriangleAlert className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
-            <p className="text-sm text-red-200 leading-relaxed">{data.rootCause}</p>
+          <div className="flex items-start gap-4 bg-red-500/10 border border-red-500/30 rounded-lg px-5 py-4">
+            <TriangleAlert className="w-6 h-6 text-red-400 shrink-0 mt-0.5" />
+            <div>
+              <h3 className="font-bold text-red-300">
+                Certification failed on {data.failedGateCount} of {data.gates.length} gates
+              </h3>
+              <p className="text-sm text-red-200/90 mt-1 leading-relaxed">
+                {data.rootCause} Common causes include toxic examples in your training data, or
+                MoE router collapse from an overly aggressive learning rate.
+              </p>
+            </div>
           </div>
         </section>
       )}
@@ -255,7 +274,13 @@ function Report({ data }: { data: DashboardData }) {
             <CardTitle className="flex items-center gap-2 text-white">
               <BrainCircuit className="w-5 h-5 text-emerald-400" /> MoE Expert Routing
             </CardTitle>
-            <CardDescription>Base vs Adapter traffic distribution per expert.</CardDescription>
+            <CardDescription>
+              {data.starvedExperts.length > 0 ? (
+                <>Base vs Adapter traffic. <span className="text-red-400">Red bars</span> indicate starved experts.</>
+              ) : (
+                "Base vs Adapter traffic distribution per expert."
+              )}
+            </CardDescription>
           </CardHeader>
           <CardContent className="h-80">
             {data.expertRouting.length > 0 ? (
@@ -326,9 +351,9 @@ function Report({ data }: { data: DashboardData }) {
             data.trusted ? (
               <a
                 href="/api/evidence"
-                className={buttonVariants({ variant: "outline" }) + " border-white/20 bg-transparent text-white hover:bg-white/10"}
+                className={buttonVariants({ variant: "outline" }) + " border-white/20 bg-transparent text-white hover:bg-white/10 gap-2"}
               >
-                Download evidence.json
+                <Download className="w-4 h-4" /> Download evidence.json
               </a>
             ) : (
               <span className="text-sm text-amber-300 flex items-center gap-2">
