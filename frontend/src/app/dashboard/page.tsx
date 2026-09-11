@@ -8,7 +8,7 @@ import { buttonVariants } from "@/components/ui/button"
 import {
   ShieldCheck, Ghost, MessageSquareOff, Biohazard, BrainCircuit, HardDrive,
   ArrowLeft, CheckCircle2, XCircle, Cpu, Zap, FolderOpen, ShieldAlert, FlaskConical,
-  TriangleAlert, KeyRound, Download,
+  TriangleAlert, Download,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from "recharts"
@@ -81,6 +81,21 @@ export default function DashboardPage() {
               <Badge variant="outline" className="h-6 border-white/20 bg-white/5 font-mono text-xs text-gray-300">
                 {state.data.runId}
               </Badge>
+              {/* Trust chip: mock runs make no trust claim; live runs are either
+                  signed by a pinned key or flagged as an unknown issuer. */}
+              {state.data.source === "mock" ? (
+                <Badge variant="outline" className="h-6 gap-1 border-amber-400/50 bg-amber-400/10 text-xs text-amber-300">
+                  <FlaskConical className="w-3 h-3" /> MOCK DATA
+                </Badge>
+              ) : state.data.trusted ? (
+                <Badge variant="outline" className="h-6 gap-1 border-emerald-400/50 bg-emerald-400/10 text-xs text-emerald-300">
+                  <ShieldCheck className="w-3 h-3" /> TRUSTED ISSUER
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="h-6 gap-1 border-amber-400/50 bg-amber-400/10 text-xs text-amber-300">
+                  <TriangleAlert className="w-3 h-3" /> UNTRUSTED ISSUER
+                </Badge>
+              )}
             </div>
           ) : (
             <div className="h-5 w-40 animate-pulse rounded-full bg-white/10" />
@@ -204,19 +219,6 @@ function Report({ data }: { data: DashboardData }) {
             <Badge variant={isPass ? "default" : "destructive"} className={`text-lg px-4 py-1 ${isPass ? "bg-emerald-500 text-black hover:bg-emerald-600" : ""}`}>
               {data.verdict}
             </Badge>
-            {data.source === "mock" ? (
-              <Badge variant="outline" className="gap-1 border-amber-400/50 bg-amber-400/10 text-amber-300">
-                <FlaskConical className="w-3 h-3" /> MOCK DATA
-              </Badge>
-            ) : data.verified ? (
-              <Badge variant="outline" className="gap-1 border-emerald-400/50 bg-emerald-400/10 text-emerald-300">
-                <ShieldCheck className="w-3 h-3" /> Ed25519 VERIFIED
-              </Badge>
-            ) : (
-              <Badge variant="outline" className="gap-1 border-amber-400/50 bg-amber-400/10 text-amber-300">
-                <KeyRound className="w-3 h-3" /> MATH VALID, BUT UNTRUSTED ISSUER
-              </Badge>
-            )}
           </div>
           <p className="text-gray-400 text-lg">
             Evaluated <span className="text-white font-mono">{data.adapter}</span> against base model{" "}
