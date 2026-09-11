@@ -23,33 +23,60 @@ export interface TrustEntry {
   fingerprint: string
 }
 
+function sha256Hex(bytes: Buffer): string {
+  return createHash("sha256").update(bytes).digest("hex")
+}
+
 /** SHA-256 over the raw 32-byte Ed25519 public key. */
 export function keyFingerprint(publicKeyPem: string): string | null {
   try {
     const der = createPublicKey(publicKeyPem).export({ format: "der", type: "spki" })
     const raw = der.subarray(der.length - 32) // SPKI trailing 32 bytes = raw key
-    return createHash("sha256").update(raw).digest("hex")
+    return sha256Hex(raw)
   } catch {
     return null
   }
 }
 
-/** Accept raw 64-char hex, PEM, or an "ssh-ed25519 AAAA..." line. */
+/**
+ * Accepts every common Ed25519 public-key encoding:
+ *   1. raw 64-char hex
+ *   2. an "ssh-ed25519 AAAA..." line
+ *   3. a PEM block
+ *   4. base64-encoded SPKI DER  ("MCowBQYDK2VwAyEA..." — openssl -outform DER | base64)
+ */
 function pinToFingerprint(pin: string): string | null {
   const s = pin.trim()
+
   if (/^[0-9a-fA-F]{64}$/.test(s)) {
-    return createHash("sha256").update(Buffer.from(s, "hex")).digest("hex")
+    return sha256Hex(Buffer.from(s, "hex"))
   }
+
   if (s.startsWith("ssh-ed25519 ")) {
     try {
       const blob = Buffer.from(s.slice("ssh-ed25519 ".length).trim(), "base64")
       if (blob.length < 32) return null
-      return createHash("sha256").update(blob.subarray(blob.length - 32)).digest("hex")
+      return sha256Hex(blob.subarray(blob.length - 32))
     } catch {
       return null
     }
   }
-  return keyFingerprint(s) // PEM
+
+  if (s.startsWith("-----BEGIN")) {
+    return keyFingerprint(s)
+  }
+
+  // base64 SPKI DER: Ed25519 SPKI is exactly 44 bytes
+  if (/^[A-Za-z0-9+/]+={0,2}$/.test(s) && s.length >= 44) {
+    try {
+      const der = Buffer.from(s, "base64")
+      if (der.length >= 44) return sha256Hex(der.subarray(der.length - 32))
+    } catch {
+      return null
+    }
+  }
+
+  return null
 }
 
 async function loadPins(): Promise<TrustEntry[]> {
