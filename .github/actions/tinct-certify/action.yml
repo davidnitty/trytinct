@@ -1,0 +1,111 @@
+name: tinct certify
+description: >-
+  Fail-closed safety certification for a LoRA adapter: runs the tinct gate
+  suite, signs the evidence bundle with Ed25519, renders the results into the
+  job summary and a pull-request comment, and fails the job on DON'T SHIP.
+
+inputs:
+  adapter:
+    description: Path to the trained LoRA adapter directory.
+    required: true
+  base-model:
+    description: HuggingFace model id the adapter was trained on.
+    required: true
+  dataset:
+    description: Optional training dataset (hashed into the evidence bundle).
+    required: false
+    default: ""
+  canaries:
+    description: Optional canaries.json for the data-leakage gate.
+    required: false
+    default: ""
+  skip-safety:
+    description: Run only the structure/smoke gates (no behavioral gates). Not recommended.
+    required: false
+    default: "false"
+  offload-experts:
+    description: Stream MoE experts from CPU on demand (Mixtral-class models).
+    required: false
+    default: "false"
+  root:
+    description: Project root for the .tinct state tree (evidence is written here).
+    required: false
+    default: ".tinct-certify"
+  run-id:
+    description: Certification id (defaults to cert_<UTC timestamp>).
+    required: false
+    default: ""
+  comment:
+    description: Post/update a pull-request comment with the results.
+    required: false
+    default: "true"
+  github-token:
+    description: Token used for the PR comment. Pass `${{ secrets.GITHUB_TOKEN }}`.
+    required: false
+    default: ""
+  python-version:
+    description: Python version for the certification environment.
+    required: false
+    default: "3.11"
+  tinct-install:
+    description: pip requirement spec used to install tinct.
+    required: false
+    default: "tinct[train] @ git+https://github.com/davidnitty/trytinct.git"
+  hf-token:
+    description: HuggingFace token for gated base models (e.g. Llama-3.1-8B).
+    required: false
+    default: ""
+
+outputs:
+  verdict:
+    description: SHIP or DON'T SHIP.
+    value: ${{ steps.certify.outputs.verdict }}
+  run-id:
+    description: The certification run id.
+    value: ${{ steps.certify.outputs.run_id }}
+  evidence-path:
+    description: Path to the signed evidence bundle.
+    value: ${{ steps.certify.outputs.evidence_path }}
+  exit-code:
+    description: Raw tinct exit code (0 SHIP, 2 DON'T SHIP, 1 error).
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install tinct
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        pip install "${{ inputs.tinct-install }}"
+
+    - name: Certify adapter
+      id: certify
+      shell: bash
+      env:
+        INPUT_ADAPTER: ${{ inputs.adapter }}
+        INPUT_BASE_MODEL: ${{ inputs.base-model }}
+        INPUT_DATASET: ${{ inputs.dataset }}
+        INPUT_CANARIES: ${{ inputs.canaries }}
+        INPUT_SKIP_SAFETY: ${{ inputs.skip-safety }}
+        INPUT_OFFLOAD_EXPERTS: ${{ inputs.offload-experts }}
+        INPUT_ROOT: ${{ inputs.root }}
+        INPUT_RUN_ID: ${{ inputs.run-id }}
+        INPUT_COMMENT: ${{ inputs.comment }}
+        INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
+        HF_TOKEN: ${{ inputs.hf-token }}
+      run: |
+        python "${{ github.action_path }}/certify.py"
+
+    - name: Upload signed evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: tinct-evidence-${{ inputs.run-id || github.run_id }}
+        path: ${{ inputs.root }}/.tinct/evidence/*.json
+        if-no-files-found: warn
+        retention-days: 90

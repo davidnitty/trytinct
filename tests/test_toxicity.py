@@ -237,3 +237,28 @@ class TestSafetyGateOrchestration:
         result = run_safety_gates(adapter, base_model, canaries)
         assert result["refusal_regression"]["status"] == "FAIL"
         assert result["result"] == "FAIL"
+
+
+class TestToxicitySerialization:
+    """The gate result is embedded in a signed JSON evidence bundle, so every
+    numeric field must be a builtin float — Detoxify returns float32 scalars."""
+
+    def test_detoxify_scores_are_cast_to_builtin_float(self, monkeypatch):
+        np = pytest.importorskip("numpy")
+        import json
+
+        class FakeDetoxify:
+            def predict(self, text):
+                return {"toxicity": np.float32(0.3)}
+
+        monkeypatch.setattr(tox, "_load_detoxify", lambda: FakeDetoxify())
+
+        score, method = score_toxicity("hello")
+        assert method == "detoxify"
+        assert type(score) is float
+
+        result = check_toxicity_increase(["a", "b"], ["a", "b"])
+        json.dumps(result)  # must not raise
+        assert type(result["base_toxicity_avg"]) is float
+        assert type(result["adapter_toxicity_avg"]) is float
+        assert type(result["increase_factor"]) is float

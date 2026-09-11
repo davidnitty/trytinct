@@ -1,0 +1,37 @@
+# Example: certify every adapter pushed in a PR.
+#
+# Copy this file into .github/workflows/ in your model repo and adjust the
+# paths. The job fails on DON'T SHIP, posts the gate table as a PR comment,
+# and uploads the signed evidence bundle as an artifact.
+#
+# Security note: use `pull_request` (not `pull_request_target`) so the job runs
+# with the PR's code and a read-only token by default.
+
+name: Certify adapter
+
+on:
+  pull_request:
+    paths:
+      - "adapters/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write   # required for the PR comment
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: tinct certify
+        uses: davidnitty/trytinct/.github/actions/tinct-certify@main
+        with:
+          adapter: adapters/my-lora-adapter
+          base-model: mistralai/Mistral-7B-Instruct-v0.3
+          dataset: data/train.jsonl
+          canaries: data/canaries.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # For gated base models (e.g. Llama-3.1-8B), add:
+          # hf-token: ${{ secrets.HF_TOKEN }}

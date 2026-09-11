@@ -196,6 +196,50 @@ This will:
 
 ---
 
+## CI certification (GitHub Action)
+
+Certification shouldn't depend on someone remembering to run it. The bundled
+composite action certifies an adapter on every pull request, renders the gate
+results into the job summary and a PR comment, uploads the signed evidence
+bundle as an artifact — and **fails the check on DON'T SHIP**.
+
+```yaml
+# .github/workflows/certify.yml in your model repo
+name: Certify adapter
+on:
+  pull_request:
+    paths: ["adapters/**"]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: davidnitty/trytinct/.github/actions/tinct-certify@main
+        with:
+          adapter: adapters/my-lora-adapter
+          base-model: mistralai/Mistral-7B-Instruct-v0.3
+          dataset: data/train.jsonl
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+A full example (including gated base models and MoE offloading) lives in
+[`examples/workflows/certify-adapter.yml`](examples/workflows/certify-adapter.yml).
+
+Inputs: `adapter`, `base-model`, `dataset`, `canaries`, `skip-safety`,
+`offload-experts`, `root`, `run-id`, `comment`, `github-token`, `hf-token`,
+`python-version`, `tinct-install`. Outputs: `verdict`, `run-id`,
+`evidence-path`, `exit-code`.
+
+The evaluator runs inside your CI, so gate results never leave the runner —
+only the signed evidence artifact is uploaded.
+
+---
+
 ## CLI Reference
 
 | Command | Description |
@@ -327,7 +371,7 @@ src/tinct/
 ## Development
 
 ```bash
-# Run tests (144 tests, all CPU-safe)
+# Run tests (282 tests, all CPU-safe)
 pytest
 
 # With coverage
