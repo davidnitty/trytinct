@@ -136,7 +136,12 @@ def run_certify(
         from tinct.evals.smoke_test import run_generation_smoke_test
 
         eval_report_path = work_dir / "eval_report.json"
-        smoke_pass = run_generation_smoke_test(base_model, adapter, eval_report_path)
+        # The smoke test must honor --offload-experts too: on a single-GPU pod
+        # it would otherwise load the full model via device_map="auto" before
+        # the streamer phase, doubling peak system RAM on MoE runs.
+        smoke_pass = run_generation_smoke_test(
+            base_model, adapter, eval_report_path, offload_experts=offload_experts
+        )
         if not smoke_pass:
             decision = "DON'T_SHIP"
     except MissingDependencyError as exc:
