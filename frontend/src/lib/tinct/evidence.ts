@@ -30,7 +30,16 @@ export interface EvidenceBundle {
  * distinguishes 0.0 from 0 when serializing and JS does not — the canonical
  * bytes must agree byte-for-byte with what the signer hashed.
  */
-function parseKeepingNumberLiterals(text: string): Record<string, any> {
+/**
+ * Parse JSON while keeping every number's original literal text (Node 22+
+ * JSON.parse source-text access). Required because Python's json module
+ * distinguishes 0.0 from 0 when serializing and JS does not — the canonical
+ * bytes must agree byte-for-byte with what the signer hashed.
+ *
+ * Pairs with {@link serializeCanonicalJson}: parse-literals → (mutate) →
+ * serialize preserves float formatting, so signature validity survives.
+ */
+export function parseKeepingNumberLiterals(text: string): Record<string, any> {
   // The 3-arg reviver (with source text) is runtime-supported since Node 22
   // but not yet in TS's DOM lib types, hence the cast.
   const reviver = (_key: string, value: any, ctx: { source: string }) => {
@@ -41,6 +50,15 @@ function parseKeepingNumberLiterals(text: string): Record<string, any> {
     text,
     reviver as unknown as (this: any, key: string, value: any) => any,
   )
+}
+
+/**
+ * Deterministic compact JSON (sorted keys) that preserves number literals
+ * marked by {@link parseKeepingNumberLiterals}. NOT the canonical payload —
+ * this serializes the whole object (including the signature block).
+ */
+export function serializeCanonicalJson(rawLit: Record<string, any>): string {
+  return canonicalJson(rawLit)
 }
 
 /**
@@ -70,7 +88,12 @@ function canonicalJson(value: unknown): string {
     .join(",")}}`
 }
 
-function canonicalBytes(rawLit: Record<string, any>): Buffer {
+/**
+ * The unsigned payload in canonical form — exported for the cross-language
+ * parity test, which pins this string against Python's
+ * `json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))`.
+ */
+export function canonicalPayloadJson(rawLit: Record<string, any>): string {
   const payload = {
     project_name: rawLit.project_name,
     model: rawLit.model,
@@ -86,7 +109,11 @@ function canonicalBytes(rawLit: Record<string, any>): Buffer {
     training_tool: rawLit.training_tool ?? "tinct",
     training_executed: rawLit.training_executed ?? true,
   }
-  return Buffer.from(canonicalJson(payload), "utf-8")
+  return canonicalJson(payload)
+}
+
+function canonicalBytes(rawLit: Record<string, any>): Buffer {
+  return Buffer.from(canonicalPayloadJson(rawLit), "utf-8")
 }
 
 export interface VerificationOutcome {
@@ -125,15 +152,24 @@ export async function verifyBundle(rawLit: Record<string, any>): Promise<Verific
 }
 
 /**
- * Locate `.tinct/evidence` directories: the TINCT_EVIDENCE_DIR env var wins,
- * then we walk up from the app dir looking for a `.tinct` project, then check
- * sibling project dirs one level up (e.g. a demo project beside `frontend/`).
+ * Locate `.tinct/evidence` directories.
+ *
+ * `TINCT_EVIDENCE_DIR` is an EXCLUSIVE override: when set, that store is the
+ * only one used, so an operator can pin a CI artifact directory without
+ * unrelated local projects leaking in. Otherwise we walk up from the app dir
+ * looking for a `.tinct` project, then check sibling project dirs one level up
+ * (e.g. a demo project beside `frontend/`).
  */
 async function findEvidenceDirs(): Promise<string[]> {
-  const candidates: string[] = []
   if (process.env.TINCT_EVIDENCE_DIR) {
-    candidates.push(path.resolve(process.env.TINCT_EVIDENCE_DIR))
+    const pinned = path.resolve(process.env.TINCT_EVIDENCE_DIR)
+    const isDir = await stat(pinned)
+      .then((s) => s.isDirectory())
+      .catch(() => false)
+    return isDir ? [pinned] : []
   }
+
+  const candidates: string[] = []
 
   let dir = process.cwd()
   for (let depth = 0; depth < 5 && dir !== path.dirname(dir); depth++) {

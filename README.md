@@ -238,6 +238,11 @@ Inputs: `adapter`, `base-model`, `dataset`, `canaries`, `skip-safety`,
 The evaluator runs inside your CI, so gate results never leave the runner —
 only the signed evidence artifact is uploaded.
 
+Demo the trust model: `python demo-cert/make_bundle.py --rogue` mints a forged
+SHIP verdict signed by an unpinned key — the dashboard verifies the math, then
+flags **UNTRUSTED ISSUER** and refuses the download (`python
+demo-cert/make_bundle.py --restore` puts the trusted run back).
+
 ---
 
 ## CLI Reference

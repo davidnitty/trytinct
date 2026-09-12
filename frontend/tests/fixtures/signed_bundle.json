@@ -1,0 +1,55 @@
+{
+  "project_name": "fixture",
+  "model": "test/tiny-fixture-model",
+  "family": "llama",
+  "decision": "SHIP",
+  "created_at": "2026-09-04T14:35:10+00:00",
+  "artifacts": {
+    "adapter": "abc123",
+    "adapter_sha256": {
+      "path": "runs/test/adapter",
+      "sha256": "abc123"
+    }
+  },
+  "data_report": {},
+  "eval_report": {
+    "status": "PASS"
+  },
+  "metrics": {},
+  "config": {
+    "adapter": "runs/test/adapter"
+  },
+  "safety_gates": {
+    "result": "PASS",
+    "canary_leakage": {
+      "status": "PASS",
+      "canaries_tested": 50,
+      "canaries_leaked": 0,
+      "leakage_rate": 0.0,
+      "threshold": 0.5
+    },
+    "toxicity": {
+      "status": "PASS",
+      "method": "heuristic",
+      "base_toxicity_avg": 0.02,
+      "adapter_toxicity_avg": 0.018,
+      "increase_factor": 0.9,
+      "threshold": 2.0
+    },
+    "offload_stats": {
+      "h2d_streams": 1,
+      "d2h_evictions": 1,
+      "cache_hits": 2,
+      "bytes_h2d": 1024,
+      "bytes_d2h": 1024
+    }
+  },
+  "training_tool": "unittest",
+  "training_executed": false,
+  "signature": {
+    "alg": "ed25519",
+    "key_name": "test-fixture",
+    "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAbtA0BC8oRqatbNTAtmD8Z9lMNtDIqr6dx79uexgJc8E=\n-----END PUBLIC KEY-----\n",
+    "value": "d95d7b0dc49a12f81e17d22b3c918681357a4548880c000f3a76637e04de0157c40ab5b5a4d225f35b04cc5d368045cbc4c52f22b6e336e33f9a547732a01006"
+  }
+}
