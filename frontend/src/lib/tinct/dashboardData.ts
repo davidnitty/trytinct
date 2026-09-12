@@ -5,6 +5,23 @@ import { mockFailData, mockRunData } from "@/lib/mockData"
 
 export type GateStatus = "PASS" | "FAIL" | "NOT RUN"
 
+/**
+ * Metadata for one evidence bundle, as listed by /api/evidence/list.
+ * `integrity` is tri-state and reports *signature* status:
+ *   verified — Ed25519 math checks out
+ *   tampered — a signature is present but does not verify
+ *   unsigned — no signature block (or the file could not be parsed)
+ * Trust in the issuing key is reported separately via `trusted`.
+ */
+export interface RunSummary {
+  run_id: string
+  timestamp: string
+  verdict: string
+  base_model: string
+  trusted: boolean
+  integrity: "verified" | "tampered" | "unsigned"
+}
+
 export interface GateView {
   key: string
   title: string

@@ -11,6 +11,7 @@ import { readFile, readdir, stat } from "node:fs/promises"
 import path from "node:path"
 
 import { classifyKey } from "@/lib/tinct/trustStore"
+import type { RunSummary } from "@/lib/tinct/dashboardData"
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -218,4 +219,76 @@ export async function findBundleByName(name: string): Promise<EvidenceBundle | n
     }
   }
   return null
+}
+
+/**
+ * Metadata for every discovered bundle, newest first.
+ *
+ * Each bundle is verified during listing: a tampered bundle must not be able
+ * to present itself as ordinary in the selector. Tampered bundles are listed
+ * rather than hidden — a tampering attempt is an operational signal.
+ * Integrity is tri-state (verified | tampered | unsigned); issuer trust is
+ * reported separately.
+ */
+export async function listBundles(): Promise<RunSummary[]> {
+  const dirs = await findEvidenceDirs()
+  const rows: (RunSummary & { sortKey: number })[] = []
+
+  for (const dir of dirs) {
+    let names: string[] = []
+    try {
+      names = (await readdir(dir)).filter((n) => n.endsWith("_evidence.json"))
+    } catch {
+      continue
+    }
+
+    for (const name of names) {
+      const fullPath = path.join(dir, name)
+      const info = await stat(fullPath).catch(() => null)
+      if (!info) continue
+
+      const runId = name.replace(/_evidence\.json$/, "")
+      let raw: Record<string, any> | null = null
+      let rawLit: Record<string, any> | null = null
+      try {
+        const text = await readFile(fullPath, "utf-8")
+        raw = JSON.parse(text)
+        rawLit = parseKeepingNumberLiterals(text)
+      } catch {
+        // Unparseable file: still surfaced, as unsigned metadata.
+      }
+
+      let integrity: RunSummary["integrity"] = "unsigned"
+      let trusted = false
+      if (raw && rawLit) {
+        const outcome = await verifyBundle(rawLit)
+        integrity = outcome.signatureValid
+          ? "verified"
+          : rawLit.signature
+            ? "tampered"
+            : "unsigned"
+        trusted = outcome.trusted
+      }
+
+      const created = raw && typeof raw.created_at === "string" ? raw.created_at : ""
+      const parsed = created ? Date.parse(created) : Number.NaN
+      rows.push({
+        run_id: runId,
+        timestamp: created || new Date(info.mtimeMs).toISOString(),
+        verdict:
+          raw?.decision === "SHIP"
+            ? "SHIP"
+            : raw?.decision
+              ? String(raw.decision).replace("_", " ")
+              : "UNKNOWN",
+        base_model: typeof raw?.model === "string" ? raw.model : "unknown",
+        trusted,
+        integrity,
+        sortKey: Number.isNaN(parsed) ? info.mtimeMs : parsed,
+      })
+    }
+  }
+
+  rows.sort((a, b) => b.sortKey - a.sortKey)
+  return rows.map(({ sortKey: _sortKey, ...summary }) => summary)
 }

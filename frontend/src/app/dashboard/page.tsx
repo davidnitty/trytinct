@@ -12,7 +12,7 @@ import {
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from "recharts"
-import type { DashboardData, GateView } from "@/lib/tinct/dashboardData"
+import type { DashboardData, GateView, RunSummary } from "@/lib/tinct/dashboardData"
 
 const GATE_ICONS: Record<string, LucideIcon> = {
   canary_leakage: Ghost,
@@ -29,8 +29,16 @@ type LoadState =
   | { status: "invalid"; message: string }
   | { status: "ready"; data: DashboardData }
 
+/** Integrity + trust marker for the run selector. */
+function runMarker(run: RunSummary): string {
+  if (run.integrity === "tampered") return "🛑"
+  if (run.integrity === "unsigned") return "❔"
+  return run.trusted ? "✅" : "⚠️"
+}
+
 export default function DashboardPage() {
   const [state, setState] = useState<LoadState>({ status: "loading" })
+  const [runs, setRuns] = useState<RunSummary[] | null>(null)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -52,6 +60,15 @@ export default function DashboardPage() {
       })
       .catch(() => setState({ status: "invalid", message: "Could not reach the evidence API." }))
   }, [])
+
+  // Run history for the selector — only meaningful for real evidence.
+  useEffect(() => {
+    if (state.status !== "ready" || state.data.source !== "live") return
+    fetch("/api/evidence/list")
+      .then((res) => (res.ok ? res.json() : { runs: [] }))
+      .then((body) => setRuns(Array.isArray(body.runs) ? body.runs : []))
+      .catch(() => setRuns([]))
+  }, [state])
 
   return (
     <main className="min-h-screen bg-black text-white antialiased">
@@ -78,9 +95,31 @@ export default function DashboardPage() {
                   Toggle demo: {state.data.verdict === "SHIP" ? "FAIL" : "PASS"}
                 </Link>
               )}
-              <Badge variant="outline" className="h-6 border-white/20 bg-white/5 font-mono text-xs text-gray-300">
-                {state.data.runId}
-              </Badge>
+              {state.data.source === "live" && runs && runs.length > 0 &&
+              runs.some((run) => run.run_id === state.data.runId) ? (
+                <select
+                  aria-label="Select a certification run"
+                  value={state.data.runId}
+                  onChange={(event) => {
+                    const value = event.target.value
+                    if (value === state.data.runId) return
+                    window.location.href =
+                      value === "latest" ? "/dashboard" : `/dashboard?run=${encodeURIComponent(value)}`
+                  }}
+                  className="h-6 max-w-[22rem] cursor-pointer rounded-full border border-white/20 bg-black/60 px-2 font-mono text-xs text-gray-200 outline-none transition-colors hover:border-white/40 focus:border-emerald-400/60"
+                >
+                  <option value="latest">latest</option>
+                  {runs.map((run) => (
+                    <option key={run.run_id} value={run.run_id}>
+                      {runMarker(run)} {run.run_id} · {run.verdict}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <Badge variant="outline" className="h-6 border-white/20 bg-white/5 font-mono text-xs text-gray-300">
+                  {state.data.runId}
+                </Badge>
+              )}
               {/* Trust chip: mock runs make no trust claim; live runs are either
                   signed by a pinned key or flagged as an unknown issuer. */}
               {state.data.source === "mock" ? (

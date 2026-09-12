@@ -17,6 +17,7 @@ npm run dev     # http://localhost:3000
         │
         ▼
 /api/evidence/latest     ← verifies Ed25519 signature + issuer trust, maps to view model
+/api/evidence/list       ← run history for the selector (metadata only, verified during listing)
 /api/evidence            ← downloads the raw bundle (only if verified AND trusted)
         │
         ▼
@@ -26,6 +27,12 @@ npm run dev     # http://localhost:3000
 Evidence discovery order: `TINCT_EVIDENCE_DIR`, then `.tinct/evidence` in the app
 directory or any parent, then sibling project directories one level up. The newest
 bundle (by mtime) wins; `?run=<name>` selects a specific one.
+
+The run selector lists history newest-first. `integrity` is tri-state —
+`verified` / `tampered` / `unsigned` — and every bundle is verified *during*
+listing, so a tampered bundle can't present itself as ordinary in the dropdown.
+Tampered bundles are listed rather than hidden (a tampering attempt is an
+operational signal); opening one still returns 409.
 
 ## Trust model
 
