@@ -21,6 +21,12 @@ Design principles:
 - **CPU-testable.** All bookkeeping lives in the pure-Python
   :class:`ExpertLRUCache`; hooks are verified via ``placement_log`` rather
   than real device inspection.
+
+Known limitation: the streamer is **inference-grade**. Experts stream at
+forward and are evicted synchronously; autograd may then require evicted
+weights at backward and fail with a device mismatch. Training MoE models uses
+the standard 4-bit QLoRA path; training-grade streaming (a re-streaming
+autograd function) is future work.
 """
 
 import logging

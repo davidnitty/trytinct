@@ -161,6 +161,15 @@ def run_train(project: Project, dataset: Path, run_name: str | None,
                       "--accelerator unsloth (unsloth manages its own placement).[/]")
         return 1
 
+    # Expert streaming is inference-grade: experts stream at forward and are
+    # evicted synchronously, so autograd may need evicted weights at backward
+    # and fail with a device mismatch on large MoE models. Training uses
+    # standard 4-bit QLoRA; certification uses the streamer.
+    if offload_experts:
+        console.print("[bold yellow]WARNING: --offload-experts is inference-grade. "
+                      "Training on large MoE models may fail at backward — the supported "
+                      "training path is standard 4-bit QLoRA (pip install bitsandbytes).[/]")
+
     # Fail-closed 0c: verify unsloth is importable BEFORE doing any expensive
     # work (model download/chunking). Fails fast with an actionable hint.
     if accelerator == "unsloth":
