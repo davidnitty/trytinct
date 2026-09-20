@@ -34,6 +34,23 @@ listing, so a tampered bundle can't present itself as ordinary in the dropdown.
 Tampered bundles are listed rather than hidden (a tampering attempt is an
 operational signal); opening one still returns 409.
 
+## Exporting a client report
+
+**Export Client Report (PDF)** on the dashboard produces a vector PDF
+(`@react-pdf/renderer`, no screenshotting) with three pages: cover + verdict
+stamp + run metadata, the safety-gate table (FAILed gates first, with failure
+reasons), and MoE streamer/routing telemetry.
+
+A PDF leaves the app, so it carries its own provenance: mock runs are stamped
+**MOCK DATA — do not circulate as evidence**, bundles from unpinned issuers are
+stamped **UNTRUSTED ISSUER**, and a failing verdict carries **DON'T SHIP**. The
+cover always shows whether the evidence verified and the issuer key fingerprint.
+
+```bash
+# Render one for inspection without opening a browser (writes to PDF_DUMP)
+PDF_DUMP=/tmp/report.pdf npx vitest run tests/pdfRender.test.tsx
+```
+
 ## Trust model
 
 Verifying a signature against the key *embedded in the bundle* only proves the file

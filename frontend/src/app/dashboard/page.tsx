@@ -15,6 +15,7 @@ import type { LucideIcon } from "lucide-react"
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from "recharts"
 import type { DashboardData, GateView, RunSummary } from "@/lib/tinct/dashboardData"
 import { buildRunSelectorModel } from "@/lib/tinct/runSelector"
+import { ExportPdfButton } from "@/components/ExportPdfButton"
 
 const GATE_ICONS: Record<string, LucideIcon> = {
   canary_leakage: Ghost,
@@ -390,19 +391,28 @@ function Report({ data }: { data: DashboardData }) {
           </div>
           {data.source === "live" ? (
             data.trusted ? (
-              <a
-                href="/api/evidence"
-                className={buttonVariants({ variant: "outline" }) + " border-white/20 bg-transparent text-white hover:bg-white/10 gap-2"}
-              >
-                <Download className="w-4 h-4" /> Download evidence.json
-              </a>
+              <div className="flex items-center gap-3">
+                <ExportPdfButton data={data} />
+                <a
+                  href="/api/evidence"
+                  className={buttonVariants({ variant: "outline" }) + " border-white/20 bg-transparent text-white hover:bg-white/10 gap-2"}
+                >
+                  <Download className="w-4 h-4" /> Download evidence.json
+                </a>
+              </div>
             ) : (
-              <span className="text-sm text-amber-300 flex items-center gap-2">
-                <ShieldAlert className="w-4 h-4" /> download disabled — untrusted issuer
-              </span>
+              <div className="flex items-center gap-3">
+                <ExportPdfButton data={data} />
+                <span className="text-sm text-amber-300 flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4" /> download disabled — untrusted issuer
+                </span>
+              </div>
             )
           ) : (
-            <span className="font-mono text-xs text-gray-500">no bundle on disk</span>
+            <div className="flex items-center gap-3">
+              <ExportPdfButton data={data} />
+              <span className="font-mono text-xs text-gray-500">no bundle on disk</span>
+            </div>
           )}
         </div>
       </section>
