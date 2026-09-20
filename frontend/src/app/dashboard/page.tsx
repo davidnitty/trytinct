@@ -9,13 +9,15 @@ import { buttonVariants } from "@/components/ui/button"
 import {
   ShieldCheck, Ghost, MessageSquareOff, Biohazard, BrainCircuit, HardDrive,
   ArrowLeft, CheckCircle2, XCircle, Cpu, Zap, FolderOpen, ShieldAlert, FlaskConical,
-  TriangleAlert, Download,
+  TriangleAlert, Download, FileText,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from "recharts"
 import type { DashboardData, GateView, RunSummary } from "@/lib/tinct/dashboardData"
 import { buildRunSelectorModel } from "@/lib/tinct/runSelector"
-import { ExportPdfButton } from "@/components/ExportPdfButton"
+import { cn } from "@/lib/utils"
+import { PDFDownloadLink } from "@react-pdf/renderer"
+import { ClientReportPDF } from "@/components/ClientReportPDF"
 
 const GATE_ICONS: Record<string, LucideIcon> = {
   canary_leakage: Ghost,
@@ -225,7 +227,7 @@ function EmptyState({ message }: { message: string }) {
       </div>
       <Link
         href="/dashboard?mock=1"
-        className={buttonVariants({ variant: "outline" }) + " border-white/20 bg-transparent text-white hover:bg-white/10 gap-2"}
+        className={cn(buttonVariants({ variant: "outline" }), "border-white/20 bg-transparent text-white hover:bg-white/10 gap-2")}
       >
         <FlaskConical className="w-4 h-4" /> View demo data instead
       </Link>
@@ -369,9 +371,9 @@ function Report({ data }: { data: DashboardData }) {
         </Card>
       </section>
 
-      {/* 4. Evidence Signature */}
+      {/* 4. Evidence Download & PDF Export */}
       <section className="border-t border-white/10 pt-8">
-        <div className="flex items-center justify-between bg-zinc-900/30 border border-white/5 rounded-lg p-6">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-zinc-900/30 border border-white/5 rounded-lg p-6">
           <div>
             <h3 className="font-semibold text-white flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-emerald-400" /> Cryptographic Evidence
@@ -379,9 +381,9 @@ function Report({ data }: { data: DashboardData }) {
             <p className="text-sm text-gray-400 mt-1">
               {data.source === "live"
                 ? data.trusted
-                  ? "Signed with Ed25519 and verified against the pinned issuer key. Tamper-proof and verifiable."
+                  ? "Signed with Ed25519 and verified against the pinned issuer key. Download the raw JSON or a branded client report."
                   : "Signature is mathematically valid, but the issuer key is not pinned in the trust store."
-                : "This is mock demo data — no signed bundle exists on disk."}
+                : "This is mock demo data — no signed bundle exists on disk. The exported report is marked MOCK DATA."}
             </p>
             {data.source === "live" && data.keyFingerprint && (
               <p className="text-xs text-gray-600 font-mono mt-1">
@@ -389,31 +391,44 @@ function Report({ data }: { data: DashboardData }) {
               </p>
             )}
           </div>
-          {data.source === "live" ? (
-            data.trusted ? (
-              <div className="flex items-center gap-3">
-                <ExportPdfButton data={data} />
-                <a
-                  href="/api/evidence"
-                  className={buttonVariants({ variant: "outline" }) + " border-white/20 bg-transparent text-white hover:bg-white/10 gap-2"}
-                >
-                  <Download className="w-4 h-4" /> Download evidence.json
-                </a>
-              </div>
-            ) : (
-              <div className="flex items-center gap-3">
-                <ExportPdfButton data={data} />
-                <span className="text-sm text-amber-300 flex items-center gap-2">
-                  <ShieldAlert className="w-4 h-4" /> download disabled — untrusted issuer
-                </span>
-              </div>
-            )
-          ) : (
-            <div className="flex items-center gap-3">
-              <ExportPdfButton data={data} />
+
+          <div className="flex flex-wrap items-center gap-3">
+            {/* THE PDF EXPORT: a real vector document, generated in the browser.
+                Warnings (mock / untrusted issuer / DON'T SHIP) are printed on the
+                report itself — a PDF leaves the app, so it carries its provenance. */}
+            <PDFDownloadLink
+              document={<ClientReportPDF data={data} />}
+              fileName={`tinct-report-${data.runId}.pdf`}
+              className={cn(
+                buttonVariants({ variant: "default" }),
+                "gap-2 bg-emerald-500 text-black hover:bg-emerald-600",
+              )}
+            >
+              {({ loading }) => (
+                <>
+                  <FileText className="w-4 h-4" />
+                  {loading ? "Generating PDF…" : "Export Client Report (PDF)"}
+                </>
+              )}
+            </PDFDownloadLink>
+
+            {data.source === "live" && data.trusted && (
+              <a
+                href="/api/evidence"
+                className={cn(buttonVariants({ variant: "outline" }), "border-white/20 bg-transparent text-white hover:bg-white/10 gap-2")}
+              >
+                <Download className="w-4 h-4" /> evidence.json
+              </a>
+            )}
+            {data.source === "live" && !data.trusted && (
+              <span className="text-sm text-amber-300 flex items-center gap-2">
+                <ShieldAlert className="w-4 h-4" /> raw download disabled — untrusted issuer
+              </span>
+            )}
+            {data.source === "mock" && (
               <span className="font-mono text-xs text-gray-500">no bundle on disk</span>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </section>
     </div>
