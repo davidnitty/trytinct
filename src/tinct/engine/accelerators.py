@@ -38,8 +38,8 @@ def load_model_with_accelerator(
     ``load_in_4bit`` enables 4-bit QLoRA on the standard path when CUDA +
     bitsandbytes are available (falls back to standard LoRA otherwise).
     ``offload_experts`` enables MoE expert streaming (Mixtral-class models):
-    the model loads on CPU and experts stream to GPU on demand via an LRU
-    residency cache — no full-model VRAM spike.
+    the model loads on CPU and experts stream to GPU on demand via an LFU
+    (LRU tie-break) residency cache — no full-model VRAM spike.
     """
     if accelerator == "unsloth":
         return _load_unsloth(model_name, lora_rank, max_seq_length)
@@ -113,7 +113,7 @@ def _load_standard(
     if offload_experts:
         # MoE path (Mixtral vanguard): load on CPU (device_map=None — never a
         # full-model .to() VRAM spike), then stream experts on demand with an
-        # LRU residency cache. 4-bit quantization and expert offloading don't
+        # LFU (LRU tie-break) residency cache. 4-bit quantization and expert offloading don't
         # compose, so bnb is skipped on this branch.
         model = AutoModelForCausalLM.from_pretrained(
             model_name,

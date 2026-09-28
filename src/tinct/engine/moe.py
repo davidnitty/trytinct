@@ -3,7 +3,7 @@ MoE expert offloading engine.
 
 Keeps router, attention, norms, embed, and lm_head on GPU.
 Keeps expert MLPs on CPU and streams them to GPU on demand
-with an LRU residency cache.
+with an LFU (LRU tie-break) residency cache.
 
 Makes a ~93GB fp16 Mixtral 8x7B fit in a 24GB GPU for certification.
 
@@ -12,14 +12,16 @@ Design principles:
 - **No VRAM spike at load.** The full model is never ``.to(device)`` —
   non-expert leaves move to the target device individually; experts stay on
   CPU from the start, so nothing transiently occupies GPU memory.
-- **LRU residency, not per-forward round-trips.** Streaming an expert to the
+- **LFU residency, not per-forward round-trips.** Streaming an expert to the
   device and evicting it after every forward would be PCIe-bound. Up to
-  ``max_resident_experts`` stay hot; eviction happens only under pressure.
+  ``max_resident_experts`` stay hot; eviction happens only under pressure, and
+  frequency (not just recency) decides the victim, so an expert that a gate
+  keeps routing to is not evicted merely for being loaded early.
 - **Synchronous eviction.** D2H eviction runs after the expert's forward
   completed (sequential generation) and is synchronous — no ``non_blocking``
   — so a pending kernel can never read a half-transferred weight.
 - **CPU-testable.** All bookkeeping lives in the pure-Python
-  :class:`ExpertLRUCache`; hooks are verified via ``placement_log`` rather
+  :class:`ExpertLFUCache`; hooks are verified via ``placement_log`` rather
   than real device inspection.
 
 Known limitation: the streamer is **inference-grade**. Experts stream at
@@ -61,35 +63,64 @@ def iter_moe_experts(model) -> Iterator[tuple[str, object]]:
             yield f"{router_name}.experts.{i}", expert
 
 
-class ExpertLRUCache:
-    """Pure-Python LRU bookkeeping for expert residency. Unit-testable."""
+class ExpertLFUCache:
+    """
+    LFU cache with LRU tie-breaking.
+
+    Keeps frequently used experts pinned to VRAM, preventing PCIe thrashing
+    when a hot expert is repeatedly routed to during safety gates. If two
+    experts share a hit count, the least-recently-used one is evicted.
+
+    Two consequences of the policy, both intentional:
+    - An evicted expert's count is dropped, so a re-admitted expert restarts
+      at 1 (standard LFU; hot experts that get evicted lose their history).
+    - A just-admitted expert also starts at 1, so under sustained pressure the
+      newest entrant is the next eviction candidate.
+    """
 
     def __init__(self, capacity: int):
         if capacity < 1:
             raise ValueError("capacity must be >= 1")
         self.capacity = capacity
-        self._order: list[str] = []  # most-recently-used at the end
+        self._resident: set[str] = set()
+        self.counts: dict[str, int] = {}
+        self.history: list[str] = []  # LRU order (oldest at index 0)
 
     def is_resident(self, key: str) -> bool:
-        return key in self._order
+        return key in self._resident
 
     def resident(self) -> set[str]:
-        return set(self._order)
+        return set(self._resident)
 
     def touch(self, key: str) -> None:
-        if key in self._order:
-            self._order.remove(key)
-        self._order.append(key)
+        """Record one use of a resident expert (count + recency)."""
+        if key in self._resident:
+            self.counts[key] += 1
+            # Move to most-recently-used end of history
+            self.history.remove(key)
+            self.history.append(key)
 
     def admit(self, key: str) -> list[str]:
         """Make key resident. Returns keys evicted to make room."""
-        if key in self._order:
+        if key in self._resident:
             self.touch(key)
             return []
-        evicted = []
-        while len(self._order) >= self.capacity:
-            evicted.append(self._order.pop(0))  # evict least-recently-used
-        self._order.append(key)
+
+        evicted: list[str] = []
+        while len(self._resident) >= self.capacity:
+            # Victim: lowest hit count, ties broken by oldest in history (LRU).
+            victim = min(
+                self._resident,
+                key=lambda k: (self.counts.get(k, 0), self.history.index(k)),
+            )
+            self._resident.remove(victim)
+            self.history.remove(victim)
+            del self.counts[victim]
+            evicted.append(victim)
+
+        self._resident.add(key)
+        self.counts[key] = 1
+        self.history.append(key)
         return evicted
 
 
@@ -113,7 +144,7 @@ class MoEStreamer:
     ):
         self.model = model
         self.device = device
-        self.cache = ExpertLRUCache(max_resident_experts)
+        self.cache = ExpertLFUCache(max_resident_experts)
         self.pin = pin_cpu_memory
         self.experts: dict[str, object] = {}
         self.hooks: list = []

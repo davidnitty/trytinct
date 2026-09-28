@@ -12,7 +12,7 @@ import pytest
 torch = pytest.importorskip("torch")  # MoE tests need torch; skip cleanly without it
 import torch.nn as nn
 
-from tinct.engine.moe import MoEStreamer, ExpertLRUCache, iter_moe_experts, iter_moe_routers
+from tinct.engine.moe import MoEStreamer, ExpertLFUCache, iter_moe_experts, iter_moe_routers
 
 
 # -- fake model (Mixtral-exact naming) ------------------------------------------
@@ -128,43 +128,78 @@ class TestStructuralDetection:
         assert dict(iter_moe_experts(dense)) == {}
 
 
-# -- ExpertLRUCache (pure bookkeeping) -------------------------------------------
+# -- ExpertLFUCache (pure bookkeeping) -------------------------------------------
 
-class TestExpertLRUCache:
+class TestExpertLFUCache:
     def test_rejects_invalid_capacity(self):
         with pytest.raises(ValueError):
-            ExpertLRUCache(0)
+            ExpertLFUCache(0)
 
     def test_admit_within_capacity_evicts_nothing(self):
-        cache = ExpertLRUCache(2)
+        cache = ExpertLFUCache(2)
         assert cache.admit("a") == []
         assert cache.admit("b") == []
         assert cache.resident() == {"a", "b"}
 
-    def test_admit_full_cache_evicts_lru(self):
-        cache = ExpertLRUCache(2)
+    def test_admit_full_cache_evicts_oldest_on_equal_counts(self):
+        # Equal counts -> LRU tie-break picks the oldest.
+        cache = ExpertLFUCache(2)
         cache.admit("a")
         cache.admit("b")
-        assert cache.admit("c") == ["a"]  # least-recently-used first
+        assert cache.admit("c") == ["a"]
         assert cache.resident() == {"b", "c"}
 
-    def test_touch_refreshes_recency(self):
-        cache = ExpertLRUCache(2)
+    def test_touch_refreshes_recency_and_count(self):
+        cache = ExpertLFUCache(2)
         cache.admit("a")
         cache.admit("b")
-        cache.touch("a")  # a is now most-recently-used
-        assert cache.admit("c") == ["b"]
+        cache.touch("a")  # a: 2 hits, most-recently-used
+        assert cache.counts["a"] == 2
+        assert cache.admit("c") == ["b"]  # b has fewer hits
         assert cache.resident() == {"a", "c"}
 
+    def test_lfu_protects_hot_experts(self):
+        """An expert used 100 times should NOT be evicted by a brand new expert."""
+        cache = ExpertLFUCache(capacity=2)
+
+        cache.admit("Expert_A")
+        cache.admit("Expert_B")
+
+        for _ in range(100):
+            cache.touch("Expert_B")
+
+        evicted = cache.admit("Expert_C")
+
+        assert evicted == ["Expert_A"]
+        assert "Expert_B" in cache.resident()
+        assert "Expert_C" in cache.resident()
+
+    def test_eviction_drops_the_victims_count(self):
+        # Documented LFU behavior: a re-admitted expert starts fresh at 1.
+        cache = ExpertLFUCache(1)
+        cache.admit("a")
+        cache.touch("a")  # a: 2
+        assert cache.admit("b") == ["a"]
+        assert "a" not in cache.counts
+        cache.admit("a")
+        assert cache.counts["a"] == 1
+
     def test_readmit_resident_key_evicts_nothing(self):
-        cache = ExpertLRUCache(2)
+        cache = ExpertLFUCache(2)
         cache.admit("a")
         cache.admit("b")
         assert cache.admit("a") == []
         assert cache.resident() == {"a", "b"}
 
+    def test_touch_ignores_non_resident_keys(self):
+        # Guards against the old LRU behavior of touch() implicitly admitting.
+        cache = ExpertLFUCache(1)
+        cache.touch("ghost")
+        assert cache.is_resident("ghost") is False
+        assert cache.resident() == set()
+
     def test_is_resident(self):
-        cache = ExpertLRUCache(1)
+        cache = ExpertLFUCache(1)
         cache.admit("x")
         assert cache.is_resident("x") is True
         assert cache.is_resident("y") is False
