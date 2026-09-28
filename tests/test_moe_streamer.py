@@ -205,6 +205,63 @@ class TestExpertLFUCache:
         assert cache.is_resident("y") is False
 
 
+# -- time-series telemetry ---------------------------------------------------------
+
+class TestStepTelemetry:
+    """record_step() snapshots hardware state once per generation step."""
+
+    def _prepared(self, capacity: int = 4):
+        model = FakeModel(_COLLAPSE_BIAS)
+        return model, MoEStreamer(model, device="cpu", max_resident_experts=capacity).prepare()
+
+    def test_records_a_snapshot_with_the_expected_shape(self):
+        _model, streamer = self._prepared()
+        snapshot = streamer.record_step()
+
+        assert snapshot["step"] == 0
+        assert isinstance(snapshot["vram_mb"], float)
+        assert snapshot["vram_mb"] >= 0.0
+        assert snapshot["resident_experts"] == 0
+        assert snapshot["h2d_streams"] == 0
+        assert snapshot["cache_hits"] == 0
+        assert streamer.telemetry == [snapshot]
+
+    def test_step_index_increments_per_call(self):
+        _model, streamer = self._prepared()
+        for _ in range(3):
+            streamer.record_step()
+        assert [entry["step"] for entry in streamer.telemetry] == [0, 1, 2]
+
+    def test_resident_count_reads_the_cache_method(self):
+        # Pins the Phase-1 API: `cache.resident` is a METHOD. A regression to
+        # `len(self.cache.resident)` raises TypeError here.
+        model, streamer = self._prepared()
+        _ = model(torch.randn(1, 4))  # stream the hot experts in
+        snapshot = streamer.record_step()
+
+        assert snapshot["resident_experts"] == len(streamer.cache.resident())
+        assert snapshot["resident_experts"] > 0
+
+    def test_counters_are_cumulative_and_track_stats(self):
+        model, streamer = self._prepared(capacity=2)
+        _ = model(torch.randn(1, 4))
+        first = streamer.record_step()
+        _ = model(torch.randn(1, 4))
+        second = streamer.record_step()
+
+        assert second["h2d_streams"] == streamer.stats["h2d_streams"]
+        assert second["cache_hits"] == streamer.stats["cache_hits"]
+        assert second["h2d_streams"] >= first["h2d_streams"]
+        assert second["cache_hits"] >= first["cache_hits"]
+
+    def test_records_on_a_dense_model_noop_streamer(self):
+        streamer = MoEStreamer(nn.Linear(4, 4), device="cpu", max_resident_experts=2)
+        streamer.prepare()  # no experts -> no-op streamer
+        snapshot = streamer.record_step()
+        assert snapshot["resident_experts"] == 0
+        assert len(streamer.telemetry) == 1
+
+
 # -- expert discovery -------------------------------------------------------------
 
 class TestIterMoeExperts:

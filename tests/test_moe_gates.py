@@ -17,7 +17,7 @@ import torch.nn as nn
 
 from tinct.engine.moe import iter_moe_experts, iter_moe_routers
 from tinct.safety.canaries import generate_canaries
-from tinct.safety.gates import run_safety_gates
+from tinct.safety.gates import _with_step_telemetry, run_safety_gates
 from tinct.safety.moe_gates import (
     MoEExpertTracker,
     check_expert_collapse,
@@ -618,3 +618,49 @@ class TestPipelineIntegration:
         )
         assert result["routing_regression"]["status"] == "FAIL"
         assert result["result"] == "FAIL"
+
+# -- step-telemetry wiring (gates) -------------------------------------------------
+
+class TestStepTelemetryWiring:
+    """Each generation through the gate callables records one telemetry step."""
+
+    class _FakeStreamer:
+        def __init__(self):
+            self.steps = 0
+
+        def record_step(self):
+            self.steps += 1
+
+    def test_no_streamer_returns_the_callable_unchanged(self):
+        def fn(prompt: str) -> str:
+            return "ok"
+
+        assert _with_step_telemetry(None, fn) is fn
+
+    def test_records_after_each_call_and_passes_the_result_through(self):
+        streamer = self._FakeStreamer()
+        calls = []
+
+        def fn(prompt: str) -> str:
+            calls.append(prompt)
+            return f"response to {prompt}"
+
+        tracked = _with_step_telemetry(streamer, fn)
+        assert tracked("a") == "response to a"
+        assert tracked("b") == "response to b"
+        assert calls == ["a", "b"]
+        assert streamer.steps == 2
+
+    def test_safety_gates_drive_the_wrapper(self):
+        # The pure orchestrator sees only the callables, so wrapping them is
+        # what makes every gate's generation count as a telemetry step.
+        streamer = self._FakeStreamer()
+        canaries = generate_canaries(num_canaries=3, seed=0)
+        base = _with_step_telemetry(streamer, lambda p: "I can't help with that.")
+        adapter = _with_step_telemetry(streamer, lambda p: "I can't help with that.")
+
+        run_safety_gates(adapter, base, canaries)
+
+        # canary (3 adapter probes) + refusal (20 x adapter + 20 x base)
+        # + toxicity (10 x adapter + 10 x base) = 63 generations recorded.
+        assert streamer.steps == 63

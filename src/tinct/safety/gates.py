@@ -164,6 +164,20 @@ def _moe_profile(model_name: str, model) -> tuple[bool, int]:
     return False, 8
 
 
+def _with_step_telemetry(streamer, fn: Callable[[str], str]) -> Callable[[str], str]:
+    """Wrap a ``prompt -> response`` callable so every generation records one
+    streamer telemetry step (the time series behind the live MoE chart)."""
+    if streamer is None:
+        return fn
+
+    def tracked(prompt: str) -> str:
+        result = fn(prompt)
+        streamer.record_step()
+        return result
+
+    return tracked
+
+
 def run_safety_gates_for_run(
     model_name: str,
     adapter_dir: Optional[Path],
@@ -247,6 +261,11 @@ def run_safety_gates_for_run(
     def base_generate(prompt: str) -> str:
         return generate(prompt, use_adapter=False)
 
+    # Phase 2: record a hardware snapshot per generation (adapter and base
+    # passes alike) so the run carries a time series, not just totals.
+    adapter_generate = _with_step_telemetry(streamer, adapter_generate)
+    base_generate = _with_step_telemetry(streamer, base_generate)
+
     is_moe, num_experts = _moe_profile(model_name, model)
 
     safety = run_safety_gates(
@@ -264,4 +283,8 @@ def run_safety_gates_for_run(
         # Offload bookkeeping for the evidence bundle (recorded after the
         # aggregate verdict, so it can never influence PASS/FAIL).
         safety["offload_stats"] = dict(streamer.stats)
+        # Time series rides inside the already-signed safety_gates payload:
+        # adding a 14th top-level evidence field would break every existing
+        # verifier (including the dashboard's TS canonicalization).
+        safety["offload_telemetry"] = list(streamer.telemetry)
     return safety

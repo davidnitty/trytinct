@@ -156,6 +156,9 @@ class MoEStreamer:
             "bytes_d2h": 0,
         }
         self.placement_log: list[tuple[str, str, int]] = []
+        # Time-series telemetry: one snapshot per recorded generation step,
+        # for live charts and post-hoc thrash analysis.
+        self.telemetry: list[dict] = []
         self._prepared = False
 
     # ------------------------------------------------------------------ setup
@@ -210,6 +213,32 @@ class MoEStreamer:
             h.remove()
         self.hooks.clear()
         self._prepared = False
+
+    # -------------------------------------------------------------- telemetry
+
+    def record_step(self) -> dict:
+        """Log one hardware snapshot (call after each prompt/generation).
+
+        Counters are cumulative, matching :attr:`stats`; diff consecutive
+        entries to chart per-step rates. Appends unbounded — gate runs record
+        tens of steps, but a very long eval should be chunked or the list
+        persisted separately rather than embedded in a signed bundle.
+        """
+        import torch
+
+        vram_mb = 0.0
+        if torch.cuda.is_available():
+            vram_mb = torch.cuda.memory_allocated() / 1024**2
+
+        snapshot = {
+            "step": len(self.telemetry),
+            "vram_mb": round(vram_mb, 1),
+            "resident_experts": len(self.cache.resident()),
+            "h2d_streams": self.stats["h2d_streams"],
+            "cache_hits": self.stats["cache_hits"],
+        }
+        self.telemetry.append(snapshot)
+        return snapshot
 
     # ------------------------------------------------------------------ hooks
 
