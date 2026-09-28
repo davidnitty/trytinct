@@ -31,6 +31,15 @@ export interface GateView {
   reason?: string
 }
 
+/** One hardware snapshot from the MoEStreamer's time series (Phase 2). */
+export interface TelemetryPoint {
+  step: number
+  vram_mb: number
+  resident_experts: number
+  h2d_streams: number
+  cache_hits: number
+}
+
 export interface DashboardData {
   source: "live" | "mock"
   verified: boolean
@@ -60,6 +69,8 @@ export interface DashboardData {
   starvedExperts: number[]
   /** The expert-collapse minimum utilization threshold, in percent. */
   utilizationThresholdPct: number | null
+  /** Per-step hardware series from the streamer (empty for runs without it). */
+  telemetry: TelemetryPoint[]
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -171,6 +182,27 @@ function summarizeFailures(gates: GateView[]): { failedGateCount: number; rootCa
 }
 
 /**
+ * Coerce the streamer's per-step series from a signed bundle into chart points.
+ * Entries are defensively validated: a malformed or non-numeric snapshot must
+ * not produce NaN in the chart (or crash it) — the series is data, not code.
+ */
+export function telemetryPoints(raw: unknown): TelemetryPoint[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter((entry) => entry && typeof entry === "object")
+    .map((entry: any, index) => {
+      const step = Number(entry.step)
+      return {
+        step: Number.isFinite(step) ? step : index,
+        vram_mb: Number(entry.vram_mb) || 0,
+        resident_experts: Number(entry.resident_experts) || 0,
+        h2d_streams: Number(entry.h2d_streams) || 0,
+        cache_hits: Number(entry.cache_hits) || 0,
+      }
+    })
+}
+
+/**
  * Expert indices the gates flagged as starved: a collapsed router names its
  * laziest expert, the regression gate names everything it starved vs base.
  */
@@ -232,6 +264,7 @@ export function bundleToDashboardData(
     rootCause,
     starvedExperts: deriveStarved(gates),
     utilizationThresholdPct: collapse?.threshold != null ? collapse.threshold * 100 : null,
+    telemetry: telemetryPoints(gates.offload_telemetry),
   }
 }
 
@@ -281,5 +314,6 @@ export function mockToDashboardData(scenario: "pass" | "fail" = "pass"): Dashboa
     rootCause,
     starvedExperts: [...new Set([...deriveStarved(gates), ...flagged])],
     utilizationThresholdPct: gates.expert_collapse?.threshold != null ? gates.expert_collapse.threshold * 100 : null,
+    telemetry: telemetryPoints(raw.telemetry),
   }
 }

@@ -12,7 +12,7 @@ import {
   TriangleAlert, Download, FileText,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from "recharts"
+import { BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from "recharts"
 import type { DashboardData, GateView, RunSummary } from "@/lib/tinct/dashboardData"
 import { buildRunSelectorModel } from "@/lib/tinct/runSelector"
 import { cn } from "@/lib/utils"
@@ -367,6 +367,89 @@ function Report({ data }: { data: DashboardData }) {
             <StatBox label="D2H Evictions" value={String(data.offloadStats.d2hEvictions)} icon={<ArrowLeft className="w-4 h-4 text-red-500" />} />
             <StatBox label="H2D Transferred" value={`${data.offloadStats.bytesH2dGb} GB`} icon={<ArrowLeft className="w-4 h-4 text-emerald-500 rotate-180" />} />
             <StatBox label="D2H Transferred" value={`${data.offloadStats.bytesD2hGb} GB`} icon={<ArrowLeft className="w-4 h-4 text-red-500" />} />
+          </CardContent>
+        </Card>
+      </section>
+
+      {/* 3b. Live hardware telemetry — the streamer's per-step time series */}
+      <section>
+        <Card className="bg-zinc-900/50 border-white/10">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-white">
+              <HardDrive className="w-5 h-5 text-emerald-400" /> Live Hardware Telemetry
+            </CardTitle>
+            <CardDescription>
+              VRAM pressure and cache hits, evaluated per safety-gate prompt. VRAM spikes mark H2D
+              expert streams; the climbing cache-hit line is the LFU cache getting hot.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="h-80">
+            {data.telemetry.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={data.telemetry}>
+                  <defs>
+                    <linearGradient id="vramGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.8} />
+                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="hitsGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.8} />
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+                  <XAxis
+                    dataKey="step"
+                    stroke="#71717a"
+                    fontSize={12}
+                    label={{ value: "Prompt Step", position: "insideBottomRight", offset: -5, fill: "#71717a" }}
+                  />
+                  <YAxis
+                    yAxisId="left"
+                    stroke="#ef4444"
+                    fontSize={12}
+                    label={{ value: "VRAM (MB)", angle: -90, position: "insideLeft", fill: "#ef4444" }}
+                  />
+                  <YAxis
+                    yAxisId="right"
+                    orientation="right"
+                    stroke="#10b981"
+                    fontSize={12}
+                    label={{ value: "Cache Hits", angle: 90, position: "insideRight", fill: "#10b981" }}
+                  />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: "8px" }}
+                    labelStyle={{ color: "#fff" }}
+                  />
+                  <Legend />
+                  <Area
+                    yAxisId="left"
+                    type="monotone"
+                    dataKey="vram_mb"
+                    stroke="#ef4444"
+                    fillOpacity={1}
+                    fill="url(#vramGrad)"
+                    name="VRAM Usage (MB)"
+                  />
+                  <Area
+                    yAxisId="right"
+                    type="monotone"
+                    dataKey="cache_hits"
+                    stroke="#10b981"
+                    fillOpacity={1}
+                    fill="url(#hitsGrad)"
+                    name="LFU Cache Hits"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-center px-6 text-sm text-gray-500">
+                <span>
+                  No step telemetry in this bundle. Per-step hardware stats are recorded by runs
+                  certified with <span className="font-mono text-gray-400">--offload-experts</span>.
+                </span>
+              </div>
+            )}
           </CardContent>
         </Card>
       </section>

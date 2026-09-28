@@ -41,6 +41,7 @@ function data(overrides: Partial<DashboardData> = {}): DashboardData {
     rootCause: "review your training data for toxic examples.",
     starvedExperts: [1],
     utilizationThresholdPct: 1,
+    telemetry: [],
     ...overrides,
   }
 }

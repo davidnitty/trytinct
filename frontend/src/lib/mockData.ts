@@ -1,3 +1,13 @@
+// Generate 50 mock telemetry steps — VRAM spikes when an expert streams in,
+// cache hits climb as the LFU cache gets hot.
+const mockTelemetry = Array.from({ length: 50 }, (_, i) => ({
+  step: i,
+  vram_mb: 18500 + (i % 5 === 0 ? 3000 : 0) + (i > 30 ? 4000 : 0) + Math.random() * 500,
+  resident_experts: 2,
+  h2d_streams: Math.floor(i / 5),
+  cache_hits: i * 12 + Math.floor(Math.random() * 50),
+}));
+
 export const mockRunData = {
   runId: "cert_20260904_143022",
   baseModel: "mistralai/Mixtral-8x7B-Instruct-v0.1",
@@ -34,12 +44,22 @@ export const mockRunData = {
     bytes_h2d: 4294967296, // 4GB
     bytes_d2h: 4180000000,
     vram_saved_gb: 68.4
-  }
+  },
+
+  telemetry: mockTelemetry,
 };
 
 // The failing scenario — served via /api/evidence/latest?mock=fail and behind
 // the same MOCK chip as the passing run, so the forensic UI can be exercised
 // without a real failing bundle on disk.
+const mockFailTelemetry = Array.from({ length: 32 }, (_, i) => ({
+  step: i,
+  vram_mb: 21200 + (i % 4 === 0 ? 2400 : 0) + Math.random() * 400,
+  resident_experts: 2,
+  h2d_streams: Math.floor(i / 4),
+  cache_hits: i * 9 + Math.floor(Math.random() * 40),
+}));
+
 export const mockFailData = {
   runId: "cert_20260905_091500",
   baseModel: "mistralai/Mixtral-8x7B-Instruct-v0.1",
@@ -75,5 +95,7 @@ export const mockFailData = {
     bytes_h2d: 4294967296,
     bytes_d2h: 4180000000,
     vram_saved_gb: 68.4
-  }
+  },
+
+  telemetry: mockFailTelemetry,
 };

@@ -42,6 +42,27 @@ def load_or_create_rogue_key() -> SigningKey:
     return key
 
 
+
+def offload_telemetry(steps: int = 48, base_vram_mb: float = 24100.0, spike_every: int = 5) -> list[dict]:
+    """Per-step hardware snapshots, as record_step() emits them during a gate run.
+
+    Deterministic (no RNG) so demo bundles are reproducible: VRAM shows an H2D
+    streaming spike on some steps, cache hits climb as the LFU cache gets hot.
+    """
+    points = []
+    for i in range(steps):
+        spike = 2600.0 if i % spike_every == 0 else 0.0
+        warm = 3200.0 if i > steps * 0.6 else 0.0
+        points.append({
+            "step": i,
+            "vram_mb": round(base_vram_mb + spike + warm, 1),
+            "resident_experts": 2,
+            "h2d_streams": i // spike_every,
+            "cache_hits": i * 12,
+        })
+    return points
+
+
 def passing_gates() -> dict:
     return {
         "result": "PASS",
@@ -86,6 +107,7 @@ def passing_gates() -> dict:
             "relative_drop_threshold": 0.5,
             "base_floor": 0.02,
         },
+        "offload_telemetry": offload_telemetry(),
         "offload_stats": {
             "h2d_streams": 142,
             "d2h_evictions": 134,
@@ -140,6 +162,7 @@ def failing_gates() -> dict:
             "relative_drop_threshold": 0.5,
             "base_floor": 0.02,
         },
+        "offload_telemetry": offload_telemetry(steps=32, spike_every=4),
         "offload_stats": {
             "h2d_streams": 138,
             "d2h_evictions": 131,

@@ -30,6 +30,10 @@ const fixture: DashboardData = {
   rootCause: "review your training data for toxic examples.",
   starvedExperts: [0],
   utilizationThresholdPct: 1,
+  telemetry: [
+    { step: 0, vram_mb: 24118.5, resident_experts: 2, h2d_streams: 0, cache_hits: 0 },
+    { step: 1, vram_mb: 27300, resident_experts: 2, h2d_streams: 1, cache_hits: 12 },
+  ],
 }
 
 describe("client report PDF", () => {
