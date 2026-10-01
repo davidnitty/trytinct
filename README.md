@@ -376,7 +376,10 @@ src/tinct/
 ## Development
 
 ```bash
-# Run tests (282 tests, all CPU-safe)
+# Run tests (289 tests, all CPU-safe)
+
+# Benchmark the expert cache policy (LFU vs LRU, CPU only, ~1s)
+python benchmarks/bench_lfu.py
 pytest
 
 # With coverage
