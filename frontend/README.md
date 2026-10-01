@@ -41,6 +41,8 @@ operational signal); opening one still returns 409.
 stamp + run metadata, the safety-gate table (FAILed gates first, with failure
 reasons), and MoE streamer/routing telemetry.
 
+The **Live Hardware Telemetry** chart is snapshotted in the browser (`html-to-image`, dark background, 2x pixel ratio) and embedded on the telemetry page — the exported PDF shows the real VRAM/cache-hit curves from the run, not a re-drawn approximation. If the snapshot fails, the PDF keeps its numeric tables and says so.
+
 A PDF leaves the app, so it carries its own provenance: mock runs are stamped
 **MOCK DATA — do not circulate as evidence**, bundles from unpinned issuers are
 stamped **UNTRUSTED ISSUER**, and a failing verdict carries **DON'T SHIP**. The

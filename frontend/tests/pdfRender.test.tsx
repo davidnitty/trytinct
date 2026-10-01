@@ -36,6 +36,11 @@ const fixture: DashboardData = {
   ],
 }
 
+// 1x1 transparent PNG — proves the Image component accepts a captured data
+// URL without depending on a real chart capture in Node.
+const CHART_PNG =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+
 describe("client report PDF", () => {
   it("renders a real PDF document", async () => {
     // toBlob() is the exact path the export button uses, so this exercises the
@@ -47,5 +52,12 @@ describe("client report PDF", () => {
     if (process.env.PDF_DUMP) writeFileSync(process.env.PDF_DUMP, bytes)
     expect(bytes.subarray(0, 5).toString("latin1")).toBe("%PDF-")
     expect(bytes.length).toBeGreaterThan(2000) // 3 pages of vector content
+  }, 30000)
+
+  it("embeds the captured chart image on the telemetry page", async () => {
+    const blob = await pdf(<ClientReportPDF data={fixture} chartImage={CHART_PNG} />).toBlob()
+    const bytes = Buffer.from(await blob.arrayBuffer())
+    if (process.env.PDF_DUMP_IMAGE) writeFileSync(process.env.PDF_DUMP_IMAGE, bytes)
+    expect(bytes.subarray(0, 5).toString("latin1")).toBe("%PDF-")
   }, 30000)
 })

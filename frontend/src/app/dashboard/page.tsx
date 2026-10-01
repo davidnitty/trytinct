@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -18,6 +18,7 @@ import { buildRunSelectorModel } from "@/lib/tinct/runSelector"
 import { cn } from "@/lib/utils"
 import { PDFDownloadLink } from "@react-pdf/renderer"
 import { ClientReportPDF } from "@/components/ClientReportPDF"
+import { captureChartPng, nextPaint } from "@/lib/tinct/chartCapture"
 
 const GATE_ICONS: Record<string, LucideIcon> = {
   canary_leakage: Ghost,
@@ -251,6 +252,24 @@ function InvalidState({ message }: { message: string }) {
 
 function Report({ data }: { data: DashboardData }) {
   const isPass = data.verdict === "SHIP"
+  const chartRef = useRef<HTMLDivElement>(null)
+  const [chartImage, setChartImage] = useState<string | null>(null)
+
+  // Snapshot the live telemetry chart once it has painted, so the PDF export
+  // embeds the real chart. Best-effort: on failure the PDF keeps its tables.
+  useEffect(() => {
+    if (data.telemetry.length === 0) return
+    let cancelled = false
+    const capture = async () => {
+      await nextPaint()
+      const png = await captureChartPng(chartRef.current)
+      if (!cancelled && png) setChartImage(png)
+    }
+    void capture()
+    return () => {
+      cancelled = true
+    }
+  }, [data.runId, data.telemetry.length])
   return (
     <div className="space-y-12">
       {/* 1. Verdict Header */}
@@ -385,6 +404,7 @@ function Report({ data }: { data: DashboardData }) {
           </CardHeader>
           <CardContent className="h-80">
             {data.telemetry.length > 0 ? (
+              <div ref={chartRef} className="h-full w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={data.telemetry}>
                   <defs>
@@ -442,6 +462,7 @@ function Report({ data }: { data: DashboardData }) {
                   />
                 </AreaChart>
               </ResponsiveContainer>
+              </div>
             ) : (
               <div className="h-full flex items-center justify-center text-center px-6 text-sm text-gray-500">
                 <span>
@@ -480,7 +501,7 @@ function Report({ data }: { data: DashboardData }) {
                 Warnings (mock / untrusted issuer / DON'T SHIP) are printed on the
                 report itself — a PDF leaves the app, so it carries its provenance. */}
             <PDFDownloadLink
-              document={<ClientReportPDF data={data} />}
+              document={<ClientReportPDF data={data} chartImage={chartImage} />}
               fileName={`tinct-report-${data.runId}.pdf`}
               className={cn(
                 buttonVariants({ variant: "default" }),
